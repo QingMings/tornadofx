@@ -52,37 +52,42 @@ fun CheckBox.bind(property: ObservableValue<Boolean>, readonly: Boolean = false)
     if (readonly || (property !is Property<*>)) selectedProperty().bind(property) else selectedProperty().bindBidirectional(property as Property<Boolean>)
 }
 
+fun CheckMenuItem.bind(property: ObservableValue<Boolean>, readonly: Boolean = false) {
+    ViewModel.register(selectedProperty(), property)
+    if (readonly || (property !is Property<*>)) selectedProperty().bind(property) else selectedProperty().bindBidirectional(property as Property<Boolean>)
+}
+
 fun Slider.bind(property: ObservableValue<Number>, readonly: Boolean = false) {
     ViewModel.register(valueProperty(), property)
     if (readonly || (property !is Property<*>)) valueProperty().bind(property) else valueProperty().bindBidirectional(property as Property<Number>)
 }
 
-inline fun <reified T : Any> Labeled.bind(property: ObservableValue<T>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) {
+inline fun <reified S : T, reified T : Any> Labeled.bind(property: ObservableValue<S>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) {
     bindStringProperty(textProperty(), converter, format, property, readonly)
 }
 
-inline fun <reified T : Any> TitledPane.bind(property: ObservableValue<T>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) =
+inline fun <reified S : T, reified T : Any> TitledPane.bind(property: ObservableValue<S>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) =
         bindStringProperty(textProperty(), converter, format, property, readonly)
 
-inline fun <reified T : Any> Text.bind(property: ObservableValue<T>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) =
+inline fun <reified S : T, reified T : Any> Text.bind(property: ObservableValue<S>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) =
         bindStringProperty(textProperty(), converter, format, property, readonly)
 
-inline fun <reified T : Any> TextInputControl.bind(property: ObservableValue<T>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) =
+inline fun <reified S : T, reified T : Any> TextInputControl.bind(property: ObservableValue<S>, readonly: Boolean = false, converter: StringConverter<T>? = null, format: Format? = null) =
         bindStringProperty(textProperty(), converter, format, property, readonly)
 
-inline fun <reified T : Any> bindStringProperty(stringProperty: StringProperty, converter: StringConverter<T>?, format: Format?, property: ObservableValue<T>, readonly: Boolean) {
+inline fun <reified S : T, reified T : Any> bindStringProperty(stringProperty: StringProperty, converter: StringConverter<T>?, format: Format?, property: ObservableValue<S>, readonly: Boolean) {
     if (stringProperty.isBound) stringProperty.unbind()
-    val effectiveReadonly = if (readonly) readonly else property !is Property<T>
+    val effectiveReadonly = if (readonly) readonly else property !is Property<S> || S::class != T::class
 
     ViewModel.register(stringProperty, property)
 
-    if (T::class == String::class) {
+    if (S::class == String::class) {
         if (effectiveReadonly)
             stringProperty.bind(property as ObservableValue<String>)
         else
             stringProperty.bindBidirectional(property as Property<String>)
     } else {
-        val effectiveConverter = if (format != null) null else converter ?: getDefaultConverter<T>()
+        val effectiveConverter = if (format != null) null else converter ?: getDefaultConverter<S>()
         if (effectiveReadonly) {
             val toStringConverter = Callable {
                 if (converter != null)
@@ -95,11 +100,11 @@ inline fun <reified T : Any> bindStringProperty(stringProperty: StringProperty, 
             stringProperty.bind(stringBinding)
         } else {
             if (effectiveConverter != null) {
-                stringProperty.bindBidirectional(property as Property<T>, effectiveConverter)
+                stringProperty.bindBidirectional(property as Property<S>, effectiveConverter as StringConverter<S>)
             } else if (format != null) {
-                stringProperty.bindBidirectional(property as Property<T>, format)
+                stringProperty.bindBidirectional(property as Property<S>, format)
             } else {
-                throw IllegalArgumentException("Cannot convert from ${T::class} to String without an explicit converter or format")
+                throw IllegalArgumentException("Cannot convert from ${S::class} to String without an explicit converter or format")
             }
         }
     }
@@ -165,8 +170,7 @@ fun <T, N> ObservableValue<T>.select(nested: (T) -> ObservableValue<N>): Propert
         override fun get() = currentNested?.value
 
         override fun set(v: N?) {
-            if (currentNested is WritableValue<*>)
-                (currentNested as WritableValue<N>).value = v
+            (currentNested as? WritableValue<N>)?.value = v
             super.set(v)
         }
 
@@ -202,8 +206,7 @@ fun <T> ObservableValue<T>.selectBoolean(nested: (T) -> BooleanExpression): Bool
         override fun getValue() = currentNested.value
 
         override fun setValue(v: Boolean?) {
-            if (currentNested is WritableValue<*>)
-                (currentNested as WritableValue<Boolean>).value = v
+            (currentNested as? WritableValue<*>)?.value = v
             super.setValue(v)
         }
 

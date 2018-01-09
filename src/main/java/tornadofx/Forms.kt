@@ -2,6 +2,8 @@ package tornadofx
 
 import javafx.beans.DefaultProperty
 import javafx.beans.binding.Bindings.createObjectBinding
+import javafx.beans.property.SimpleObjectProperty
+import javafx.beans.property.SimpleStringProperty
 import javafx.collections.ListChangeListener
 import javafx.collections.ObservableList
 import javafx.css.PseudoClass
@@ -12,18 +14,15 @@ import javafx.geometry.Orientation.VERTICAL
 import javafx.scene.Node
 import javafx.scene.control.ButtonBar
 import javafx.scene.control.Label
-import javafx.scene.layout.HBox
-import javafx.scene.layout.Pane
+import javafx.scene.layout.*
 import javafx.scene.layout.Priority.SOMETIMES
-import javafx.scene.layout.Region
-import javafx.scene.layout.VBox
 import javafx.stage.Stage
 import java.util.*
 import java.util.concurrent.Callable
 
-fun EventTarget.form(op: (Form.() -> Unit)? = null) = opcr(this, Form(), op)
+fun EventTarget.form(op: Form.() -> Unit = {}) = opcr(this, Form(), op)
 
-fun EventTarget.fieldset(text: String? = null, icon: Node? = null, labelPosition: Orientation? = null, wrapWidth: Double? = null, op: (Fieldset.() -> Unit)? = null): Fieldset {
+fun EventTarget.fieldset(text: String? = null, icon: Node? = null, labelPosition: Orientation? = null, wrapWidth: Double? = null, op: Fieldset.() -> Unit = {}): Fieldset {
     val fieldset = Fieldset(text ?: "")
     if (wrapWidth != null) fieldset.wrapWidth = wrapWidth
     if (labelPosition != null) fieldset.labelPosition = labelPosition
@@ -35,10 +34,10 @@ fun EventTarget.fieldset(text: String? = null, icon: Node? = null, labelPosition
 /**
  *  Creates a ButtonBarFiled with the given button order (refer to [javafx.scene.control.ButtonBar#buttonOrderProperty()] for more information about buttonOrder).
  */
-fun EventTarget.buttonbar(buttonOrder: String? = null, forceLabelIndent: Boolean = true, op: (ButtonBar.() -> Unit)? = null): ButtonBarField {
+fun EventTarget.buttonbar(buttonOrder: String? = null, forceLabelIndent: Boolean = true, op: ButtonBar.() -> Unit = {}): ButtonBarField {
     val field = ButtonBarField(buttonOrder, forceLabelIndent)
-    opcr(this, field, null)
-    op?.invoke(field.inputContainer)
+    opcr(this, field){}
+    op(field.inputContainer)
     return field
 }
 
@@ -51,10 +50,10 @@ fun EventTarget.buttonbar(buttonOrder: String? = null, forceLabelIndent: Boolean
  *
  * @see buttonbar
  */
-fun EventTarget.field(text: String? = null, orientation: Orientation = HORIZONTAL, forceLabelIndent: Boolean = false, op: (Field.() -> Unit)? = null): Field {
+fun EventTarget.field(text: String? = null, orientation: Orientation = HORIZONTAL, forceLabelIndent: Boolean = false, op: Field.() -> Unit = {}): Field {
     val field = Field(text ?: "", orientation, forceLabelIndent)
-    opcr(this, field, null)
-    op?.invoke(field)
+    opcr(this, field){}
+    op(field)
     return field
 }
 
@@ -74,23 +73,35 @@ open class Form : VBox() {
 
 @DefaultProperty("children")
 open class Fieldset(text: String? = null, labelPosition: Orientation = HORIZONTAL) : VBox() {
-    var text by property<String>()
-    fun textProperty() = getProperty(Fieldset::text)
+    @Deprecated("Please use the new more concise syntax.", ReplaceWith("textProperty"))
+    fun textProperty() = textProperty
+    val textProperty = SimpleStringProperty()
+    var text by textProperty
 
-    var inputGrow by property(SOMETIMES)
-    fun inputGrowProperty() = getProperty(Fieldset::inputGrow)
+    val inputGrowProperty = SimpleObjectProperty<Priority>(SOMETIMES)
+    var inputGrow by inputGrowProperty
+    @Deprecated("Please use the new more concise syntax.", ReplaceWith("inputGrowProperty"), DeprecationLevel.WARNING)
+    fun inputGrowProperty() = inputGrowProperty
 
-    var labelPosition by property<Orientation>()
-    fun labelPositionProperty() = getProperty(Fieldset::labelPosition)
+    var labelPositionProperty = SimpleObjectProperty<Orientation>()
+    var labelPosition by labelPositionProperty
+    @Deprecated("Please use the new more concise syntax.", ReplaceWith("labelPositionProperty"), DeprecationLevel.WARNING)
+    fun labelPositionProperty() = labelPositionProperty
 
-    var wrapWidth by property<Number>()
-    fun wrapWidthProperty() = getProperty(Fieldset::wrapWidth)
+    val wrapWidthProperty = SimpleObjectProperty<Number>()
+    var wrapWidth by wrapWidthProperty
+    @Deprecated("Please use the new more concise syntax.", ReplaceWith("wrapWidthProperty"), DeprecationLevel.WARNING)
+    fun wrapWidthProperty() = wrapWidthProperty
 
-    var icon by property<Node>()
-    fun iconProperty() = getProperty(Fieldset::icon)
+    val iconProperty = SimpleObjectProperty<Node>()
+    var icon by iconProperty
+    @Deprecated("Please use the new more concise syntax.", ReplaceWith("iconProperty"), DeprecationLevel.WARNING)
+    fun iconProperty() = iconProperty
 
-    var legend by property<Label?>()
-    fun legendProperty() = getProperty(Fieldset::legend)
+    val legendProperty = SimpleObjectProperty<Label>()
+    var legend by legendProperty
+    @Deprecated("Please use the new more concise syntax.", ReplaceWith("legendProperty"), DeprecationLevel.WARNING)
+    fun legendProperty() = legendProperty
 
     init {
         addClass(Stylesheet.fieldset)
@@ -99,10 +110,10 @@ open class Fieldset(text: String? = null, labelPosition: Orientation = HORIZONTA
         syncOrientationState()
 
         // Add legend label when text is populated
-        textProperty().onChange { newValue -> if (!newValue.isNullOrBlank()) addLegend() }
+        textProperty.onChange { newValue -> if (!newValue.isNullOrBlank()) addLegend() }
 
         // Add legend when icon is populated
-        iconProperty().onChange { newValue -> if (newValue != null) addLegend() }
+        iconProperty.onChange { newValue -> if (newValue != null) addLegend() }
 
         // Make sure input children gets the configured HBox.hgrow property
         syncHgrow()
@@ -113,8 +124,8 @@ open class Fieldset(text: String? = null, labelPosition: Orientation = HORIZONTA
 
         // Register/deregister with parent Form
         parentProperty().addListener { _, oldParent, newParent ->
-            ((oldParent as? Form) ?: oldParent?.findParentOfType(Form::class))?.fieldsets?.remove(this)
-            ((newParent as? Form) ?: newParent?.findParentOfType(Form::class))?.fieldsets?.add(this)
+            ((oldParent as? Form) ?: oldParent?.findParent<Form>())?.fieldsets?.remove(this)
+            ((newParent as? Form) ?: newParent?.findParent<Form>())?.fieldsets?.add(this)
         }
     }
 
@@ -135,7 +146,7 @@ open class Fieldset(text: String? = null, labelPosition: Orientation = HORIZONTA
         })
 
         // Change HGrow for unconfigured children when inputGrow changes
-        inputGrowProperty().onChange {
+        inputGrowProperty.onChange {
             children.asSequence().filterIsInstance<Field>().forEach { field ->
                 field.inputContainer.children.forEach { configureHgrow(it) }
             }
@@ -143,7 +154,7 @@ open class Fieldset(text: String? = null, labelPosition: Orientation = HORIZONTA
     }
 
     private fun syncOrientationState() {
-        labelPositionProperty().onChange { newValue ->
+        labelPositionProperty.onChange { newValue ->
             if (newValue == HORIZONTAL) {
                 pseudoClassStateChanged(VERTICAL_PSEUDOCLASS_STATE, false)
                 pseudoClassStateChanged(HORIZONTAL_PSEUDOCLASS_STATE, true)
@@ -154,34 +165,31 @@ open class Fieldset(text: String? = null, labelPosition: Orientation = HORIZONTA
         }
 
         // Setup listeneres for wrapping
-        wrapWidthProperty().onChange { newValue ->
+        wrapWidthProperty.onChange { newValue ->
             val responsiveOrientation = createObjectBinding<Orientation>(Callable {
                 if (width < newValue?.toDouble() ?: 0.0) VERTICAL else HORIZONTAL
             }, widthProperty())
 
-            if (labelPositionProperty().isBound)
-                labelPositionProperty().unbind()
-
-            labelPositionProperty().bind(responsiveOrientation)
+            labelPositionProperty.cleanBind(responsiveOrientation)
         }
     }
 
     private fun addLegend() {
         if (legend == null) {
             legend = Label()
-            legend!!.textProperty().bind(textProperty())
-            legend!!.addClass(Stylesheet.legend)
+            legend.textProperty().bind(textProperty)
+            legend.addClass(Stylesheet.legend)
             children.add(0, legend)
         }
 
-        legend!!.graphic = icon
+        legend.graphic = icon
     }
 
     private fun configureHgrow(input: Node) {
         HBox.setHgrow(input, inputGrow)
     }
 
-    val form: Form get() = findParentOfType(Form::class)!!
+    val form: Form get() = findParent<Form>()!!
 
     internal val fields = HashSet<Field>()
 
@@ -200,7 +208,7 @@ class StageAwareFieldset(text: String? = null, labelPosition: Orientation = HORI
  * of the field is activated, this input element will receive focus.
  */
 fun Node.mnemonicTarget() {
-    findParentOfType(Field::class)?.apply {
+    findParent<Field>()?.apply {
         label.isMnemonicParsing = true
         label.labelFor = this@mnemonicTarget
     }
@@ -229,16 +237,18 @@ class Field(text: String? = null, orientation: Orientation = HORIZONTAL, forceLa
 
         // Register/deregister with parent Fieldset
         parentProperty().addListener { _, oldParent, newParent ->
-            ((oldParent as? Fieldset) ?: oldParent?.findParentOfType(Fieldset::class))?.fields?.remove(this)
-            ((newParent as? Fieldset) ?: newParent?.findParentOfType(Fieldset::class))?.fields?.add(this)
+            ((oldParent as? Fieldset) ?: oldParent?.findParent<Fieldset>())?.fields?.remove(this)
+            ((newParent as? Fieldset) ?: newParent?.findParent<Fieldset>())?.fields?.add(this)
         }
     }
 }
 
 @DefaultProperty("inputs")
 abstract class AbstractField(text: String? = null, val forceLabelIndent: Boolean = false) : Pane() {
-    var text: String? by property(text)
-    fun textProperty() = getProperty(Field::text)
+    val labelProperty = SimpleStringProperty(text)
+    @Deprecated("Please use the new more concise syntax.", ReplaceWith("textProperty"), DeprecationLevel.WARNING)
+    fun textProperty() = labelProperty
+    var text by labelProperty
 
     val label = Label()
     val labelContainer = HBox(label).apply { addClass(Stylesheet.labelContainer) }
@@ -250,14 +260,14 @@ abstract class AbstractField(text: String? = null, val forceLabelIndent: Boolean
     init {
         isFocusTraversable = false
         addClass(Stylesheet.field)
-        label.textProperty().bind(textProperty())
+        label.textProperty().bind(labelProperty)
         children.add(labelContainer)
     }
 
-    val fieldset: Fieldset get() = findParentOfType(Fieldset::class)!!
+    val fieldset: Fieldset get() = findParent()!!
 
     override fun computePrefHeight(width: Double): Double {
-        val labelHasContent = forceLabelIndent || !text.isNullOrBlank()
+        val labelHasContent = forceLabelIndent || !labelProperty.value.isNullOrBlank()
 
         val labelHeight = if (labelHasContent) labelContainer.prefHeight(width) else 0.0
         val inputHeight = inputContainer.prefHeight(width)
@@ -272,7 +282,7 @@ abstract class AbstractField(text: String? = null, val forceLabelIndent: Boolean
 
     override fun computePrefWidth(height: Double): Double {
         val fieldset = fieldset
-        val labelHasContent = forceLabelIndent || !text.isNullOrBlank()
+        val labelHasContent = forceLabelIndent || !labelProperty.value.isNullOrBlank()
 
         val labelWidth = if (labelHasContent) fieldset.form.labelContainerWidth(height) else 0.0
         val inputWidth = inputContainer.prefWidth(height)
@@ -289,7 +299,7 @@ abstract class AbstractField(text: String? = null, val forceLabelIndent: Boolean
 
     override fun layoutChildren() {
         val fieldset = fieldset
-        val labelHasContent = forceLabelIndent || !text.isNullOrBlank()
+        val labelHasContent = forceLabelIndent || !labelProperty.value.isNullOrBlank()
 
         val insets = insets
         val contentX = insets.left

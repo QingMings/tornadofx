@@ -1,5 +1,7 @@
 package tornadofx.testapps
 
+import javafx.collections.FXCollections
+import javafx.scene.Parent
 import javafx.scene.control.SelectionMode
 import tornadofx.*
 import tornadofx.testapps.DataGridTestApp.Companion.images
@@ -30,6 +32,8 @@ class DataGridTestApp : App(DataGridTest::class, DataGridStyles::class) {
 
 class DataGridTest : View("DataGrid") {
     var datagrid: DataGrid<String> by singleAssign()
+    val list = FXCollections.observableArrayList<String>()
+    var paginator = DataGridPaginator(list, itemsPerPage = 5)
 
     override val root = borderpane {
         left {
@@ -37,23 +41,21 @@ class DataGridTest : View("DataGrid") {
                 combobox(values = images.keys.toList()) {
                     promptText = "Select images"
                     valueProperty().onChange {
-                        datagrid.items.setAll(images[it])
+                        list.setAll(images[it])
                     }
                     shortcut("k") { value = "kittens" }
                     shortcut("p") { value = "puppies" }
                 }
                 button("Add").action {
-                    datagrid.items.add("http://i.imgur.com/bvqTBT0b.jpg")
+                    list.add("http://i.imgur.com/bvqTBT0b.jpg")
                 }
             }
         }
         center {
-            datagrid = datagrid<String> {
+            datagrid = datagrid(paginator.items) {
                 setPrefSize(550.0, 550.0)
 
-                selectionModel.selectionMode = SelectionMode.MULTIPLE
-                //maxCellsInRow = 3
-                //maxRows = 3
+                selectionModel.selectionMode = SelectionMode.SINGLE
                 cellWidth = 164.0
                 cellHeight = 164.0
 
@@ -67,10 +69,17 @@ class DataGridTest : View("DataGrid") {
             }
         }
         bottom {
-            label(stringBinding(datagrid.selectionModel.selectedItems) { joinToString(", ") })
+            vbox {
+                add(paginator)
+                hbox {
+                    label(stringBinding(datagrid.selectionModel.selectedItems) { joinToString(", ") })
+                    button("Remove from index 2").action {
+                        if (list.size > 2) list.removeAt(2)
+                    }
+                }
+            }
         }
     }
-
 }
 
 class DataGridStyles : Stylesheet() {

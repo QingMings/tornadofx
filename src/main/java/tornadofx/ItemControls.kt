@@ -2,7 +2,9 @@
 
 package tornadofx
 
+import com.sun.corba.se.impl.util.RepositoryId.cache
 import com.sun.javafx.scene.control.skin.TableRowSkin
+import com.sun.org.apache.bcel.internal.Repository.addClass
 import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.beans.Observable
@@ -29,6 +31,10 @@ import javafx.scene.shape.Polygon
 import javafx.scene.text.Text
 import javafx.util.Callback
 import javafx.util.StringConverter
+import tornadofx.Stylesheet.Companion.editable
+import tornadofx.Stylesheet.Companion.root
+import tornadofx.Stylesheet.Companion.title
+import tornadofx.WizardStyles.Companion.graphic
 import java.util.*
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
@@ -38,19 +44,38 @@ import kotlin.reflect.KProperty1
 /**
  * Create a spinner for an arbitrary type. This spinner requires you to configure a value factory, or it will throw an exception.
  */
-fun <T> EventTarget.spinner(editable: Boolean = false, property: Property<T>? = null, op: (Spinner<T>.() -> Unit)? = null): Spinner<T> {
+fun <T> EventTarget.spinner(editable: Boolean = false, property: Property<T>? = null, enableScroll: Boolean = false, op: Spinner<T>.() -> Unit = {}): Spinner<T> {
     val spinner = Spinner<T>()
     spinner.isEditable = editable
     opcr(this, spinner, op)
     if (property != null) {
-        if (spinner.valueFactory == null) throw IllegalArgumentException("You must configure the value factory or use the Number based spinner builder which configures a default value factory along with min, max and initialValue!")
+        requireNotNull(spinner.valueFactory) {
+            "You must configure the value factory or use the Number based spinner builder " +
+                    "which configures a default value factory along with min, max and initialValue!"
+        }
         spinner.valueFactory.valueProperty().bindBidirectional(property)
         ViewModel.register(spinner.valueFactory.valueProperty(), property)
     }
+
+    if (enableScroll) {
+        spinner.setOnScroll { event ->
+            if (event.deltaY > 0) spinner.increment()
+            if (event.deltaY < 0) spinner.decrement()
+        }
+    }
+
+    if (editable) {
+        spinner.focusedProperty().addListener { _, _, newValue ->
+            if (!newValue) {
+                spinner.increment(0)
+            }
+        }
+    }
+
     return spinner
 }
 
-inline fun <reified T : Number> EventTarget.spinner(min: T? = null, max: T? = null, initialValue: T? = null, amountToStepBy: T? = null, editable: Boolean = false, property: Property<T>? = null, noinline op: (Spinner<T>.() -> Unit)? = null): Spinner<T> {
+inline fun <reified T : Number> EventTarget.spinner(min: T? = null, max: T? = null, initialValue: T? = null, amountToStepBy: T? = null, editable: Boolean = false, property: Property<T>? = null, enableScroll: Boolean = false, noinline op: Spinner<T>.() -> Unit = {}): Spinner<T> {
     val spinner: Spinner<T>
     val isInt = (property is IntegerProperty && property !is DoubleProperty && property !is FloatProperty) || min is Int || max is Int || initialValue is Int ||
             T::class == Int::class || T::class == Integer::class || T::class.javaPrimitiveType == Integer::class.java
@@ -64,52 +89,107 @@ inline fun <reified T : Number> EventTarget.spinner(min: T? = null, max: T? = nu
         ViewModel.register(spinner.valueFactory.valueProperty(), property)
     }
     spinner.isEditable = editable
+
+    if (enableScroll) {
+        spinner.setOnScroll { event ->
+            if (event.deltaY > 0) spinner.increment()
+            if (event.deltaY < 0) spinner.decrement()
+        }
+    }
+
+    if (editable) {
+        spinner.focusedProperty().addListener { _, _, newValue ->
+            if (!newValue) {
+                spinner.increment(0)
+            }
+        }
+    }
+
     return opcr(this, spinner, op)
 }
 
-fun <T> EventTarget.spinner(items: ObservableList<T>, editable: Boolean = false, property: Property<T>? = null, op: (Spinner<T>.() -> Unit)? = null): Spinner<T> {
+fun <T> EventTarget.spinner(items: ObservableList<T>, editable: Boolean = false, property: Property<T>? = null, enableScroll: Boolean = false, op: Spinner<T>.() -> Unit = {}): Spinner<T> {
     val spinner = Spinner<T>(items)
     if (property != null) {
         spinner.valueFactory.valueProperty().bindBidirectional(property)
         ViewModel.register(spinner.valueFactory.valueProperty(), property)
     }
     spinner.isEditable = editable
+
+    if (enableScroll) {
+        spinner.setOnScroll { event ->
+            if (event.deltaY > 0) spinner.increment()
+            if (event.deltaY < 0) spinner.decrement()
+        }
+    }
+
+    if (editable) {
+        spinner.focusedProperty().addListener { _, _, newValue ->
+            if (!newValue) {
+                spinner.increment(0)
+            }
+        }
+    }
+
     return opcr(this, spinner, op)
 }
 
-fun <T> EventTarget.spinner(valueFactory: SpinnerValueFactory<T>, editable: Boolean = false, property: Property<T>? = null, op: (Spinner<T>.() -> Unit)? = null): Spinner<T> {
+fun <T> EventTarget.spinner(valueFactory: SpinnerValueFactory<T>, editable: Boolean = false, property: Property<T>? = null, enableScroll: Boolean = false, op: Spinner<T>.() -> Unit = {}): Spinner<T> {
     val spinner = Spinner<T>(valueFactory)
     if (property != null) {
         spinner.valueFactory.valueProperty().bindBidirectional(property)
         ViewModel.register(spinner.valueFactory.valueProperty(), property)
     }
     spinner.isEditable = editable
+
+    if (enableScroll) {
+        spinner.setOnScroll { event ->
+            if (event.deltaY > 0) spinner.increment()
+            if (event.deltaY < 0) spinner.decrement()
+        }
+    }
+
+    if (editable) {
+        spinner.focusedProperty().addListener { _, _, newValue ->
+            if (!newValue) {
+                spinner.increment(0)
+            }
+        }
+    }
+
     return opcr(this, spinner, op)
 }
 
-fun <T> EventTarget.combobox(property: Property<T>? = null, values: List<T>? = null, op: (ComboBox<T>.() -> Unit)? = null) = opcr(this, ComboBox<T>().apply {
-    if (values != null) items = if (values is ObservableList<*>) values as ObservableList<T> else values.observable()
+fun <T> EventTarget.combobox(property: Property<T>? = null, values: List<T>? = null, op: ComboBox<T>.() -> Unit = {}) = opcr(this, ComboBox<T>().apply {
+    if (values != null) items = values as? ObservableList<T> ?: values.observable()
     if (property != null) bind(property)
 }, op)
 
-fun <T> EventTarget.choicebox(property: Property<T>? = null, values: List<T>? = null, op: (ChoiceBox<T>.() -> Unit)? = null) = opcr(this, ChoiceBox<T>().apply {
-    if (values != null) items = if (values is ObservableList<*>) values as ObservableList<T> else values.observable()
+fun <T> ComboBox<T>.cellFormat(scope: Scope, formatButtonCell: Boolean = true, formatter: ListCell<T>.(T) -> Unit) {
+    cellFactory = Callback {
+        //ListView may be defined or not, so properties are set the safe way
+        SmartListCell(scope, it, mapOf<Any, Any>("tornadofx.cellFormat" to formatter))
+    }
+    if (formatButtonCell) buttonCell = cellFactory.call(null)
+}
+
+fun <T> EventTarget.choicebox(property: Property<T>? = null, values: List<T>? = null, op: ChoiceBox<T>.() -> Unit = {}) = opcr(this, ChoiceBox<T>().apply {
+    if (values != null) items = (values as? ObservableList<T>) ?: values.observable()
     if (property != null) bind(property)
 }, op)
 
-fun <T> EventTarget.listview(values: ObservableList<T>? = null, op: (ListView<T>.() -> Unit)? = null) = opcr(this, ListView<T>().apply {
+fun <T> EventTarget.listview(values: ObservableList<T>? = null, op: ListView<T>.() -> Unit = {}) = opcr(this, ListView<T>().apply {
     if (values != null) {
         if (values is SortedFilteredList<T>) values.bindTo(this)
         else items = values
     }
 }, op)
 
-fun <T> EventTarget.listview(values: ReadOnlyListProperty<T>, op: (ListView<T>.() -> Unit)? = null) = listview(values as ObservableValue<ObservableList<T>>, op)
+fun <T> EventTarget.listview(values: ReadOnlyListProperty<T>, op: ListView<T>.() -> Unit = {}) = listview(values as ObservableValue<ObservableList<T>>, op)
 
-fun <T> EventTarget.listview(values: ObservableValue<ObservableList<T>>, op: (ListView<T>.() -> Unit)? = null) = opcr(this, ListView<T>().apply {
+fun <T> EventTarget.listview(values: ObservableValue<ObservableList<T>>, op: ListView<T>.() -> Unit = {}) = opcr(this, ListView<T>().apply {
     fun rebinder() {
-        if (items is SortedFilteredList<*>)
-            (items as SortedFilteredList<T>).bindTo(this)
+        (items as? SortedFilteredList<T>)?.bindTo(this)
     }
     itemsProperty().bind(values)
     rebinder()
@@ -118,7 +198,7 @@ fun <T> EventTarget.listview(values: ObservableValue<ObservableList<T>>, op: (Li
     }
 }, op)
 
-fun <T> EventTarget.tableview(items: ObservableList<T>? = null, op: (TableView<T>.() -> Unit)? = null): TableView<T> {
+fun <T> EventTarget.tableview(items: ObservableList<T>? = null, op: TableView<T>.() -> Unit = {}): TableView<T> {
     val tableview = TableView<T>()
     if (items != null) {
         if (items is SortedFilteredList<T>) items.bindTo(tableview)
@@ -127,54 +207,56 @@ fun <T> EventTarget.tableview(items: ObservableList<T>? = null, op: (TableView<T
     return opcr(this, tableview, op)
 }
 
-fun <T> EventTarget.tableview(items: ReadOnlyListProperty<T>, op: (TableView<T>.() -> Unit)? = null) = tableview(items as ObservableValue<ObservableList<T>>, op)
+fun <T> EventTarget.tableview(items: ReadOnlyListProperty<T>, op: TableView<T>.() -> Unit = {}) = tableview(items as ObservableValue<ObservableList<T>>, op)
 
-fun <T> EventTarget.tableview(items: ObservableValue<ObservableList<T>>, op: (TableView<T>.() -> Unit)? = null): TableView<T> {
+fun <T> EventTarget.tableview(items: ObservableValue<ObservableList<T>>, op: TableView<T>.() -> Unit = {}): TableView<T> {
     val tableview = TableView<T>()
     fun rebinder() {
-        if (tableview.items is SortedFilteredList<*>)
-            (tableview.items as SortedFilteredList<T>).bindTo(tableview)
+        (tableview.items as? SortedFilteredList<T>)?.bindTo(tableview)
     }
     tableview.itemsProperty().bind(items)
     rebinder()
     tableview.itemsProperty().onChange {
         rebinder()
     }
+    items.onChange {
+        rebinder()
+    }
     return opcr(this, tableview, op)
 }
 
-fun <T> EventTarget.treeview(root: TreeItem<T>? = null, op: (TreeView<T>.() -> Unit)? = null): TreeView<T> {
+fun <T> EventTarget.treeview(root: TreeItem<T>? = null, op: TreeView<T>.() -> Unit = {}): TreeView<T> {
     val treeview = TreeView<T>()
     if (root != null) treeview.root = root
     return opcr(this, treeview, op)
 }
 
-fun <T> EventTarget.treetableview(root: TreeItem<T>? = null, op: (TreeTableView<T>.() -> Unit)? = null): TreeTableView<T> {
+fun <T> EventTarget.treetableview(root: TreeItem<T>? = null, op: TreeTableView<T>.() -> Unit = {}): TreeTableView<T> {
     val treetableview = TreeTableView<T>()
     if (root != null) treetableview.root = root
     return opcr(this, treetableview, op)
 }
 
 fun <T : Any> TreeView<T>.lazyPopulate(
-        leafCheck: (LazyTreeItem<T>) -> Boolean = { it.childFactoryReturnedNull() },
-        itemProcessor: ((LazyTreeItem<T>) -> Unit)? = null,
+        leafCheck: (LazyTreeItem<T>) -> Boolean = { it.hasChildren() },
+        itemProcessor: (LazyTreeItem<T>) -> Unit = {},
         childFactory: (TreeItem<T>) -> List<T>?
 ) {
-    fun createItem(value: T) = LazyTreeItem(value, leafCheck, itemProcessor, childFactory).apply { itemProcessor?.invoke(this) }
+    fun createItem(value: T) = LazyTreeItem(value, leafCheck, itemProcessor, childFactory).also(itemProcessor)
 
-    if (root == null) throw IllegalArgumentException("You must set a root TreeItem before calling lazyPopulate")
+    requireNotNull(root) { "You must set a root TreeItem before calling lazyPopulate" }
 
     task {
         childFactory.invoke(root)
     } success {
-        root.children.setAll(it?.map(::createItem))
+        root.children.setAll(it?.map(::createItem) ?: emptyList())
     }
 }
 
 class LazyTreeItem<T : Any>(
         value: T,
         val leafCheck: (LazyTreeItem<T>) -> Boolean,
-        val itemProcessor: ((LazyTreeItem<T>) -> Unit)? = null,
+        val itemProcessor: (LazyTreeItem<T>) -> Unit = {},
         val childFactory: (TreeItem<T>) -> List<T>?
 ) : TreeItem<T>(value) {
     var leafResult: Boolean? = null
@@ -190,12 +272,9 @@ class LazyTreeItem<T : Any>(
     override fun getChildren(): ObservableList<TreeItem<T>> {
         if (!childFactoryInvoked) {
             task {
-                invokeChildFactorySynchronously()
+                invokeAndSetChildFactorySynchronously()
             } success {
-                if (childFactoryResult != null) {
-                    super.getChildren().setAll(childFactoryResult!!.map { newLazyTreeItem(it) })
-                    listenForChanges()
-                }
+                if (childFactoryResult != null) listenForChanges()
             }
         }
         return super.getChildren()
@@ -222,19 +301,21 @@ class LazyTreeItem<T : Any>(
         })
     }
 
-    fun childFactoryReturnedNull() = invokeChildFactorySynchronously() == null
+    fun hasChildren(): Boolean {
+        val result = invokeAndSetChildFactorySynchronously()
+        return result == null || result.isEmpty()
+    }
 
-    private fun invokeChildFactorySynchronously(): List<T>? {
+    private fun invokeAndSetChildFactorySynchronously(): List<T>? {
         if (!childFactoryInvoked) {
             childFactoryInvoked = true
             childFactoryResult = childFactory(this)
-            if (childFactoryResult != null)
-                super.getChildren().setAll(childFactoryResult!!.map { newLazyTreeItem(it) })
+            if (childFactoryResult != null) super.getChildren().setAll(childFactoryResult!!.map { newLazyTreeItem(it) })
         }
         return childFactoryResult
     }
 
-    private fun newLazyTreeItem(item: T) = LazyTreeItem(item, leafCheck, itemProcessor, childFactory).apply { itemProcessor?.invoke(this) }
+    private fun newLazyTreeItem(item: T) = LazyTreeItem(item, leafCheck, itemProcessor, childFactory).apply { itemProcessor(this) }
 }
 
 fun <T> TreeItem<T>.treeitem(value: T? = null, op: TreeItem<T>.() -> Unit = {}): TreeItem<T> {
@@ -257,7 +338,7 @@ fun <S> TableView<S>.makeIndexColumn(name: String = "#", startNumber: Int = 1): 
     }
 }
 
-fun <S, T> TableColumn<S, T>.enableTextWrap(): TableColumn<S, T> {
+fun <S, T> TableColumn<S, T>.enableTextWrap() = apply {
     setCellFactory {
         TableCell<S, T>().apply {
             val text = Text()
@@ -267,7 +348,6 @@ fun <S, T> TableColumn<S, T>.enableTextWrap(): TableColumn<S, T> {
             text.textProperty().bind(stringBinding(itemProperty()) { get()?.toString() ?: "" })
         }
     }
-    return this
 }
 
 @Suppress("UNCHECKED_CAST")
@@ -286,12 +366,12 @@ fun <S> TreeTableView<S>.addColumnInternal(column: TreeTableColumn<S, *>, index:
  * Create a column holding children columns
  */
 @Suppress("UNCHECKED_CAST")
-fun <S> TableView<S>.nestedColumn(title: String, op: (TableView<S>.(TableColumn<S, Any?>) -> Unit)? = null): TableColumn<S, Any?> {
+fun <S> TableView<S>.nestedColumn(title: String, op: TableView<S>.(TableColumn<S, Any?>) -> Unit = {}): TableColumn<S, Any?> {
     val column = TableColumn<S, Any?>(title)
     addColumnInternal(column)
     val previousColumnTarget = properties["tornadofx.columnTarget"] as? ObservableList<TableColumn<S, *>>
     properties["tornadofx.columnTarget"] = column.columns
-    op?.invoke(this, column)
+    op(this, column)
     properties["tornadofx.columnTarget"] = previousColumnTarget
     return column
 }
@@ -300,12 +380,12 @@ fun <S> TableView<S>.nestedColumn(title: String, op: (TableView<S>.(TableColumn<
  * Create a column holding children columns
  */
 @Suppress("UNCHECKED_CAST")
-fun <S> TreeTableView<S>.nestedColumn(title: String, op: (TreeTableView<S>.() -> Unit)? = null): TreeTableColumn<S, Any?> {
+fun <S> TreeTableView<S>.nestedColumn(title: String, op: TreeTableView<S>.() -> Unit = {}): TreeTableColumn<S, Any?> {
     val column = TreeTableColumn<S, Any?>(title)
     addColumnInternal(column)
     val previousColumnTarget = properties["tornadofx.columnTarget"] as? ObservableList<TableColumn<S, *>>
     properties["tornadofx.columnTarget"] = column.columns
-    op?.invoke(this)
+    op(this)
     properties["tornadofx.columnTarget"] = previousColumnTarget
     return column
 }
@@ -313,52 +393,56 @@ fun <S> TreeTableView<S>.nestedColumn(title: String, op: (TreeTableView<S>.() ->
 /**
  * Create a column using the propertyName of the attribute you want shown.
  */
-fun <S, T> TableView<S>.column(title: String, propertyName: String, op: (TableColumn<S, T>.() -> Unit)? = null): TableColumn<S, T> {
+fun <S, T> TableView<S>.column(title: String, propertyName: String, op: TableColumn<S, T>.() -> Unit = {}): TableColumn<S, T> {
     val column = TableColumn<S, T>(title)
     column.cellValueFactory = PropertyValueFactory<S, T>(propertyName)
     addColumnInternal(column)
-    op?.invoke(column)
-    return column
+    return column.also(op)
 }
 
 /**
  * Create a column using the getter of the attribute you want shown.
  */
-@JvmName("pojoColumn") fun <S, T> TableView<S>.column(title: String, getter: KFunction<T>): TableColumn<S, T> {
-    val propName = getter.name.substring(3).let { it.first().toLowerCase() + it.substring(1) }
+@JvmName("pojoColumn")
+fun <S, T> TableView<S>.column(title: String, getter: KFunction<T>): TableColumn<S, T> {
+    val startIndex = if (getter.name.startsWith("is") && getter.name[2].isUpperCase()) 2 else 3
+    val propName = getter.name.substring(startIndex).decapitalize()
     return this.column(title, propName)
 }
 
 /**
  * Create a column using the propertyName of the attribute you want shown.
  */
-fun <S, T> TreeTableView<S>.column(title: String, propertyName: String, op: (TreeTableColumn<S, T>.() -> Unit)? = null): TreeTableColumn<S, T> {
+fun <S, T> TreeTableView<S>.column(title: String, propertyName: String, op: TreeTableColumn<S, T>.() -> Unit = {}): TreeTableColumn<S, T> {
     val column = TreeTableColumn<S, T>(title)
     column.cellValueFactory = TreeItemPropertyValueFactory<S, T>(propertyName)
     addColumnInternal(column)
-    op?.invoke(column)
-    return column
+    return column.also(op)
 }
 
 /**
  * Create a column using the getter of the attribute you want shown.
  */
-@JvmName("pojoColumn") fun <S, T> TreeTableView<S>.column(title: String, getter: KFunction<T>): TreeTableColumn<S, T> {
-    val propName = getter.name.substring(3).let { it.first().toLowerCase() + it.substring(1) }
+@JvmName("pojoColumn")
+fun <S, T> TreeTableView<S>.column(title: String, getter: KFunction<T>): TreeTableColumn<S, T> {
+    val startIndex = if (getter.name.startsWith("is") && getter.name[2].isUpperCase()) 2 else 3
+    val propName = getter.name.substring(startIndex).decapitalize()
     return this.column(title, propName)
 }
 
-fun <S, T> TableColumn<S, T?>.useComboBox(items: ObservableList<T>, afterCommit: ((TableColumn.CellEditEvent<S, T?>) -> Unit)? = null): TableColumn<S, T?> {
+fun <S, T> TableColumn<S, T?>.useComboBox(items: ObservableList<T>, afterCommit: (TableColumn.CellEditEvent<S, T?>) -> Unit = {}) = apply {
     cellFactory = ComboBoxTableCell.forTableColumn(items)
     setOnEditCommit {
         val property = it.tableColumn.getCellObservableValue(it.rowValue) as Property<T?>
         property.value = it.newValue
-        afterCommit?.invoke(it)
+        afterCommit(it)
     }
-    return this
 }
 
-inline fun <S, reified T> TableColumn<S, T?>.useTextField(converter: StringConverter<T>? = null, noinline afterCommit: ((TableColumn.CellEditEvent<S, T?>) -> Unit)? = null): TableColumn<S, T?> {
+inline fun <S, reified T> TableColumn<S, T?>.useTextField(
+        converter: StringConverter<T>? = null,
+        noinline afterCommit: (TableColumn.CellEditEvent<S, T?>) -> Unit = {}
+) = apply {
     when (T::class) {
         String::class -> {
             @Suppress("UNCHECKED_CAST")
@@ -366,8 +450,7 @@ inline fun <S, reified T> TableColumn<S, T?>.useTextField(converter: StringConve
             stringColumn.cellFactory = TextFieldTableCell.forTableColumn()
         }
         else -> {
-            if (converter == null)
-                throw IllegalArgumentException("You must supply a converter for non String columns")
+            requireNotNull(converter) { "You must supply a converter for non String columns" }
             cellFactory = TextFieldTableCell.forTableColumn(converter)
         }
     }
@@ -375,45 +458,42 @@ inline fun <S, reified T> TableColumn<S, T?>.useTextField(converter: StringConve
     setOnEditCommit {
         val property = it.tableColumn.getCellObservableValue(it.rowValue) as Property<T?>
         property.value = it.newValue
-        afterCommit?.invoke(it)
+        afterCommit(it)
     }
-    return this
 }
 
-fun <S, T> TableColumn<S, T?>.useChoiceBox(items: ObservableList<T>, afterCommit: ((TableColumn.CellEditEvent<S, T?>) -> Unit)? = null): TableColumn<S, T?> {
+fun <S, T> TableColumn<S, T?>.useChoiceBox(items: ObservableList<T>, afterCommit: (TableColumn.CellEditEvent<S, T?>) -> Unit = {}) = apply {
     cellFactory = ChoiceBoxTableCell.forTableColumn(items)
     setOnEditCommit {
         val property = it.tableColumn.getCellObservableValue(it.rowValue) as Property<T?>
         property.value = it.newValue
-        afterCommit?.invoke(it)
+        afterCommit(it)
     }
-    return this
 }
 
-fun <S> TableColumn<S, out Number?>.useProgressBar(afterCommit: ((TableColumn.CellEditEvent<S, Number?>) -> Unit)? = null) = apply {
-    cellFormat {
+fun <S> TableColumn<S, out Number?>.useProgressBar(scope: Scope, afterCommit: (TableColumn.CellEditEvent<S, Number?>) -> Unit = {}) = apply {
+    cellFormat(scope) {
         addClass(Stylesheet.progressBarTableCell)
         graphic = cache {
-            progressbar(itemProperty().doubleBinding { (it as? Number)?.toDouble() ?: 0.0 }) {
+            progressbar(itemProperty().doubleBinding { it?.toDouble() ?: 0.0 }) {
                 useMaxWidth = true
             }
         }
     }
     (this as TableColumn<S, Number?>).setOnEditCommit {
         val property = it.tableColumn.getCellObservableValue(it.rowValue) as Property<Number?>
-        property.value = (it.newValue as? Number)?.toDouble()
-        afterCommit?.invoke(it as TableColumn.CellEditEvent<S, Number?>)
+        property.value = it.newValue?.toDouble()
+        afterCommit(it as TableColumn.CellEditEvent<S, Number?>)
     }
 }
 
-fun <S> TableColumn<S, Boolean?>.useCheckbox(editable: Boolean = true): TableColumn<S, Boolean?> {
+fun <S> TableColumn<S, Boolean?>.useCheckbox(editable: Boolean = true) = apply {
     setCellFactory { CheckBoxCell(editable) }
     if (editable) {
         Platform.runLater {
             tableView?.isEditable = true
         }
     }
-    return this
 }
 
 fun <S> ListView<S>.useCheckbox(converter: StringConverter<S>? = null, getter: (S) -> ObservableValue<Boolean>) {
@@ -462,58 +542,69 @@ fun <T> TableView<T>.bindSelected(model: ItemViewModel<T>) {
     }
 }
 
-val TableView<*>.selectedColumn: TableColumn<Any?, Any?>? get() = selectionModel.selectedCells.firstOrNull()?.tableColumn
+val <T> TableView<T>.selectedCell: TablePosition<T, *>?
+    get() = selectionModel.selectedCells.firstOrNull() as TablePosition<T, *>?
+
+val <T> TableView<T>.selectedColumn: TableColumn<T, *>?
+    get() = selectedCell?.tableColumn
+
+val <T> TableView<T>.selectedValue: Any?
+    get() = selectedColumn?.getCellObservableValue(selectedItem)?.value
+
+val <T> TreeTableView<T>.selectedCell: TreeTablePosition<T, *>?
+    get() = selectionModel.selectedCells.firstOrNull()
+
+val <T> TreeTableView<T>.selectedColumn: TreeTableColumn<T, *>?
+    get() = selectedCell?.tableColumn
+
+val <T> TreeTableView<T>.selectedValue: Any?
+    get() = selectedColumn?.getCellObservableValue(selectionModel.selectedItem)?.value
 
 /**
  * Create a column with a value factory that extracts the value from the given mutable
  * property and converts the property to an observable value.
  */
-inline fun <reified S, T> TableView<S>.column(title: String, prop: KMutableProperty1<S, T>, noinline op: (TableColumn<S, T>.() -> Unit)? = null): TableColumn<S, T> {
+inline fun <reified S, T> TableView<S>.column(title: String, prop: KMutableProperty1<S, T>, noinline op: TableColumn<S, T>.() -> Unit = {}): TableColumn<S, T> {
     val column = TableColumn<S, T>(title)
     column.cellValueFactory = Callback { observable(it.value, prop) }
     addColumnInternal(column)
-    op?.invoke(column)
-    return column
+    return column.also(op)
 }
 
-inline fun <reified S, T> TreeTableView<S>.column(title: String, prop: KMutableProperty1<S, T>, noinline op: (TreeTableColumn<S, T>.() -> Unit)? = null): TreeTableColumn<S, T> {
+inline fun <reified S, T> TreeTableView<S>.column(title: String, prop: KMutableProperty1<S, T>, noinline op: TreeTableColumn<S, T>.() -> Unit = {}): TreeTableColumn<S, T> {
     val column = TreeTableColumn<S, T>(title)
     column.cellValueFactory = Callback { observable(it.value.value, prop) }
-    columns.add(column)
-    op?.invoke(column)
-    return column
+    addColumnInternal(column)
+    return column.also(op)
 }
 
 /**
  * Create a column with a value factory that extracts the value from the given property and
  * converts the property to an observable value.
  */
-inline fun <reified S, T> TableView<S>.column(title: String, prop: KProperty1<S, T>, noinline op: (TableColumn<S, T>.() -> Unit)? = null): TableColumn<S, T> {
+inline fun <reified S, T> TableView<S>.column(title: String, prop: KProperty1<S, T>, noinline op: TableColumn<S, T>.() -> Unit = {}): TableColumn<S, T> {
     val column = TableColumn<S, T>(title)
     column.cellValueFactory = Callback { observable(it.value, prop) }
     addColumnInternal(column)
-    op?.invoke(column)
-    return column
+    return column.also(op)
 }
 
-inline fun <reified S, T> TreeTableView<S>.column(title: String, prop: KProperty1<S, T>, noinline op: (TreeTableColumn<S, T>.() -> Unit)? = null): TreeTableColumn<S, T> {
+inline fun <reified S, T> TreeTableView<S>.column(title: String, prop: KProperty1<S, T>, noinline op: TreeTableColumn<S, T>.() -> Unit = {}): TreeTableColumn<S, T> {
     val column = TreeTableColumn<S, T>(title)
     column.cellValueFactory = Callback { observable(it.value.value, prop) }
-    columns.add(column)
-    op?.invoke(column)
-    return column
+    addColumnInternal(column)
+    return column.also(op)
 }
 
 /**
  * Create a column with a value factory that extracts the value from the given ObservableValue property.
  */
 @JvmName(name = "columnForObservableProperty")
-inline fun <reified S, T> TableView<S>.column(title: String, prop: KProperty1<S, ObservableValue<T>>, noinline op: (TableColumn<S, T>.() -> Unit)? = null): TableColumn<S, T> {
+inline fun <reified S, T> TableView<S>.column(title: String, prop: KProperty1<S, ObservableValue<T>>, noinline op: TableColumn<S, T>.() -> Unit = {}): TableColumn<S, T> {
     val column = TableColumn<S, T>(title)
     column.cellValueFactory = Callback { prop.call(it.value) }
     addColumnInternal(column)
-    op?.invoke(column)
-    return column
+    return column.also(op)
 }
 
 /**
@@ -546,11 +637,10 @@ fun <S> TableView<S>.onEditCommit(onCommit: TableColumn.CellEditEvent<S, Any>.(S
  * `value { it.value.someProperty }` to set up a cellValueFactory that must return T or ObservableValue<T>
  */
 @Suppress("UNUSED_PARAMETER")
-fun <S, T : Any> TableView<S>.column(title: String, cellType: KClass<T>, op: (TableColumn<S, T>.() -> Unit)? = null): TableColumn<S, T> {
+fun <S, T : Any> TableView<S>.column(title: String, cellType: KClass<T>, op: TableColumn<S, T>.() -> Unit = {}): TableColumn<S, T> {
     val column = TableColumn<S, T>(title)
     addColumnInternal(column)
-    op?.invoke(column)
-    return column
+    return column.also(op)
 }
 
 /**
@@ -559,7 +649,7 @@ fun <S, T : Any> TableView<S>.column(title: String, cellType: KClass<T>, op: (Ta
 fun <S, T> TableView<S>.column(title: String, valueProvider: (TableColumn.CellDataFeatures<S, T>) -> ObservableValue<T>): TableColumn<S, T> {
     val column = TableColumn<S, T>(title)
     column.cellValueFactory = Callback { valueProvider(it) }
-    columns.add(column)
+    addColumnInternal(column)
     return column
 }
 
@@ -568,19 +658,18 @@ fun <S, T> TableView<S>.column(title: String, valueProvider: (TableColumn.CellDa
  * wrapped in a SimpleObjectProperty for convenience.
  */
 @Suppress("UNCHECKED_CAST")
-infix fun <S> TableColumn<S, *>.value(cellValueFactory: (TableColumn.CellDataFeatures<S, Any>) -> Any?): TableColumn<S, *> {
+infix fun <S> TableColumn<S, *>.value(cellValueFactory: (TableColumn.CellDataFeatures<S, Any>) -> Any?) = apply {
     this.cellValueFactory = Callback {
         val createdValue = cellValueFactory(it as TableColumn.CellDataFeatures<S, Any>)
-        if (createdValue is ObservableValue<*>) createdValue as ObservableValue<Any> else SimpleObjectProperty(createdValue)
+        (createdValue as? ObservableValue<Any>) ?: SimpleObjectProperty(createdValue)
     }
-    return this
 }
 
 @JvmName(name = "columnForObservableProperty")
 inline fun <reified S, T> TreeTableView<S>.column(title: String, prop: KProperty1<S, ObservableValue<T>>): TreeTableColumn<S, T> {
     val column = TreeTableColumn<S, T>(title)
     column.cellValueFactory = Callback { prop.call(it.value.value) }
-    columns.add(column)
+    addColumnInternal(column)
     return column
 }
 
@@ -598,7 +687,7 @@ inline fun <S, reified T> TableView<S>.column(title: String, observableFn: KFunc
 inline fun <S, reified T> TreeTableView<S>.column(title: String, observableFn: KFunction<ObservableValue<T>>): TreeTableColumn<S, T> {
     val column = TreeTableColumn<S, T>(title)
     column.cellValueFactory = Callback { observableFn.call(it.value) }
-    columns.add(column)
+    addColumnInternal(column)
     return column
 }
 
@@ -608,7 +697,7 @@ inline fun <S, reified T> TreeTableView<S>.column(title: String, observableFn: K
 inline fun <reified S, T> TreeTableView<S>.column(title: String, noinline valueProvider: (TreeTableColumn.CellDataFeatures<S, T>) -> ObservableValue<T>): TreeTableColumn<S, T> {
     val column = TreeTableColumn<S, T>(title)
     column.cellValueFactory = Callback { valueProvider(it) }
-    columns.add(column)
+    addColumnInternal(column)
     return column
 }
 
@@ -639,9 +728,11 @@ class RowExpanderPane(val tableRow: TableRow<*>, val expanderColumn: ExpanderCol
     }
 
     fun expandedProperty() = expanderColumn.getCellObservableValue(tableRow.index) as SimpleBooleanProperty
-    var expanded: Boolean get() = expandedProperty().value; set(value) {
-        expandedProperty().value = value
-    }
+    var expanded: Boolean
+        get() = expandedProperty().value
+        set(value) {
+            expandedProperty().value = value
+        }
 
     override fun getUserAgentStylesheet() = RowExpanderPane::class.java.getResource("rowexpanderpane.css").toExternalForm()
 }
@@ -668,7 +759,7 @@ class ExpanderColumn<S>(private val expandedNodeCallback: RowExpanderPane.(S) ->
 
     fun getOrCreateExpandedNode(tableRow: TableRow<S>): Node? {
         val index = tableRow.index
-        if (index > -1 && index < tableView.items.size) {
+        if (index in tableView.items.indices) {
             val item = tableView.items[index]!!
             var node: Node? = expandedNodeCache[item]
             if (node == null) {
@@ -736,14 +827,15 @@ class ExpandableTableRowSkin<S>(val tableRow: TableRow<S>, val expander: Expande
         }
     }
 
-    val expanded: Boolean get() {
-        val item = skinnable.item
-        return (item != null && expander.getCellData(skinnable.index))
-    }
+    val expanded: Boolean
+        get() {
+            val item = skinnable.item
+            return (item != null && expander.getCellData(skinnable.index))
+        }
 
     private fun getContent(): Node? {
         val node = expander.getOrCreateExpandedNode(tableRow)
-        if (!children.contains(node)) children.add(node)
+        if (node !in children) children.add(node)
         return node
     }
 
@@ -801,24 +893,27 @@ fun <T> TableView<T>.selectOnDrag() {
 fun <S> TableView<S>.enableDirtyTracking() = editModel.enableDirtyTracking()
 
 @Suppress("UNCHECKED_CAST")
-val <S> TableView<S>.editModel: TableViewEditModel<S> get() = properties.getOrPut("tornadofx.editModel") { TableViewEditModel(this) } as TableViewEditModel<S>
+val <S> TableView<S>.editModel: TableViewEditModel<S>
+    get() = properties.getOrPut("tornadofx.editModel") { TableViewEditModel(this) } as TableViewEditModel<S>
 
 class TableViewEditModel<S>(val tableView: TableView<S>) {
     val items = FXCollections.observableHashMap<S, TableColumnDirtyState<S>>()
 
     private var _selectedItemDirtyState: ObjectBinding<TableColumnDirtyState<S>?>? = null
-    val selectedItemDirtyState: ObjectBinding<TableColumnDirtyState<S>?> get() {
-        if (_selectedItemDirtyState == null)
-            _selectedItemDirtyState = objectBinding(tableView.selectionModel.selectedItemProperty()) { getDirtyState(value) }
-        return _selectedItemDirtyState!!
-    }
+    val selectedItemDirtyState: ObjectBinding<TableColumnDirtyState<S>?>
+        get() {
+            if (_selectedItemDirtyState == null)
+                _selectedItemDirtyState = objectBinding(tableView.selectionModel.selectedItemProperty()) { getDirtyState(value) }
+            return _selectedItemDirtyState!!
+        }
 
     private var _selectedItemDirty: BooleanBinding? = null
-    val selectedItemDirty: BooleanBinding get() {
-        if (_selectedItemDirty == null)
-            _selectedItemDirty = booleanBinding(selectedItemDirtyState) { value?.dirty?.value ?: false }
-        return _selectedItemDirty!!
-    }
+    val selectedItemDirty: BooleanBinding
+        get() {
+            if (_selectedItemDirty == null)
+                _selectedItemDirty = booleanBinding(selectedItemDirtyState) { value?.dirty?.value ?: false }
+            return _selectedItemDirty!!
+        }
 
     fun getDirtyState(item: S): TableColumnDirtyState<S> = items.getOrPut(item) { TableColumnDirtyState(this, item) }
 
@@ -883,7 +978,7 @@ class TableViewEditModel<S>(val tableView: TableView<S>) {
      * Commit the current item, or just the given column for this item if a column is supplied
      */
     fun commit(item: S, column: TableColumn<*, *>? = null) {
-        val dirtyState = getDirtyState(item);
+        val dirtyState = getDirtyState(item)
         if (column == null) dirtyState.commit() else dirtyState.commit(column)
     }
 
@@ -899,7 +994,7 @@ class TableViewEditModel<S>(val tableView: TableView<S>) {
      * Rollback the current item, or just the given column for this item if a column is supplied
      */
     fun rollback(item: S, column: TableColumn<*, *>? = null) {
-        val dirtyState = getDirtyState(item);
+        val dirtyState = getDirtyState(item)
         if (column == null) dirtyState.rollback() else dirtyState.rollback(column)
     }
 
@@ -921,18 +1016,20 @@ class TableColumnDirtyState<S>(val editModel: TableViewEditModel<S>, val item: S
 
     // Dirty columns and initial value
     private var _dirtyColumns: ObservableMap<TableColumn<S, Any?>, Any?>? = null
-    val dirtyColumns: ObservableMap<TableColumn<S, Any?>, Any?> get() {
-        if (_dirtyColumns == null)
-            _dirtyColumns = FXCollections.observableHashMap<TableColumn<S, Any?>, Any?>()
-        return _dirtyColumns!!
-    }
+    val dirtyColumns: ObservableMap<TableColumn<S, Any?>, Any?>
+        get() {
+            if (_dirtyColumns == null)
+                _dirtyColumns = FXCollections.observableHashMap<TableColumn<S, Any?>, Any?>()
+            return _dirtyColumns!!
+        }
 
     private var _dirty: BooleanBinding? = null
-    val dirty: BooleanBinding get() {
-        if (_dirty == null)
-            _dirty = booleanBinding(dirtyColumns) { isNotEmpty() }
-        return _dirty!!
-    }
+    val dirty: BooleanBinding
+        get() {
+            if (_dirty == null)
+                _dirty = booleanBinding(dirtyColumns) { isNotEmpty() }
+            return _dirty!!
+        }
     val isDirty: Boolean get() = dirty.value
 
     fun getDirtyColumnProperty(column: TableColumn<*, *>) = booleanBinding(dirtyColumns) { containsKey(column as TableColumn<S, Any?>) }
@@ -1003,7 +1100,7 @@ class DirtyDecoratingTableRowSkin<S>(tableRow: TableRow<S>, val editModel: Table
             val polygon = getPolygon(cell)
             val isDirty = item != null && editModel.getDirtyState(item).isDirtyColumn(cell.tableColumn)
             if (isDirty) {
-                if (!children.contains(polygon))
+                if (polygon !in children)
                     children.add(polygon)
 
                 polygon.relocate(cell.layoutX, y)
@@ -1022,8 +1119,7 @@ class DirtyDecoratingTableRowSkin<S>(tableRow: TableRow<S>, val editModel: Table
 @Suppress("UNCHECKED_CAST")
 fun <S, T> TableColumn<S, T>.setValue(item: S, value: T?) {
     val property = getTableColumnProperty(item)
-    if (property is WritableValue<*>)
-        (property as WritableValue<T>).value = value
+    (property as? WritableValue<T>)?.value = value
 }
 
 /**

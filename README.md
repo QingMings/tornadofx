@@ -1,7 +1,7 @@
 ![TornadoFX Logo](graphics/tornado-fx-logo.png?raw=true "TornadoFX")
 # TornadoFX
 
-Lightweight JavaFX Framework for Kotlin
+JavaFX Framework for Kotlin
 
 [![Travis CI](https://travis-ci.org/edvin/tornadofx.svg)](https://travis-ci.org/edvin/tornadofx)
 [![Maven Central](https://maven-badges.herokuapp.com/maven-central/no.tornado/tornadofx/badge.svg)](https://search.maven.org/#search|ga|1|no.tornado.tornadofx)
@@ -52,11 +52,10 @@ You also need a full rebuild of your code after a version upgrade. If you run in
 ## Getting started
 
 - [Screencasts](https://www.youtube.com/user/MrEdvinsyse)
-- [Book (EAP)](https://edvin.gitbooks.io/tornadofx-guide/content/) We are gradually migrating all information from the Wiki into the Guide
+- [Guide](https://edvin.gitbooks.io/tornadofx-guide/content/) We are gradually migrating all information from the Wiki into the Guide
+- [KDocs](https://tornadofx.io/dokka/tornadofx/tornadofx/index.html)
 - [Wiki](https://github.com/edvin/tornadofx/wiki)
 - [Slack](https://kotlinlang.slack.com/messages/tornadofx/details/)
-- [User Forum](https://groups.google.com/forum/#!forum/tornadofx)
-- [Dev Forum](https://groups.google.com/forum/#!forum/tornadofx-dev)
 - [Stack Overflow](http://stackoverflow.com/questions/ask?tags=tornadofx)
 - [Documentation](https://github.com/edvin/tornadofx/wiki/Documentation) 
 - [IntelliJ IDEA Plugin](https://github.com/edvin/tornadofx-idea-plugin) 
@@ -69,7 +68,7 @@ You also need a full rebuild of your code after a version upgrade. If you run in
 ```bash
 mvn archetype:generate -DarchetypeGroupId=no.tornado \
   -DarchetypeArtifactId=tornadofx-quickstart-archetype \
-  -DarchetypeVersion=1.7.7
+  -DarchetypeVersion=1.7.14
 ```
 
 ### Add TornadoFX to your project
@@ -80,14 +79,14 @@ mvn archetype:generate -DarchetypeGroupId=no.tornado \
 <dependency>
     <groupId>no.tornado</groupId>
     <artifactId>tornadofx</artifactId>
-    <version>1.7.7</version>
+    <version>1.7.14</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-compile 'no.tornado:tornadofx:1.7.7'
+compile 'no.tornado:tornadofx:1.7.14'
 ```
 
 ### Snapshots are published to Sonatype
@@ -122,6 +121,10 @@ class HelloWorld : View() {
 Load the root node from `HelloWorld.fxml` and inject controls by `fx:id`
   
 ```kotlin
+import javafx.scene.control.Label
+import javafx.scene.layout.HBox
+import tornadofx.*
+
 class HelloWorld : View() {
     override val root: HBox by fxml()
     val myLabel: Label by fxid()
@@ -135,6 +138,9 @@ class HelloWorld : View() {
 Start your application and show the primary `View` and add a type safe stylesheet
     
 ```kotlin
+import javafx.scene.text.FontWeight
+import tornadofx.*
+
 class HelloWorldApp : App(HelloWorld::class, Styles::class)
 
 class Styles : Stylesheet() {
@@ -189,7 +195,7 @@ class Customer : JsonModel {
 
     override fun updateModel(json: JsonObject) {
         with(json) {
-            id = int("id")
+            id = int("id") ?: 0
             name = string("name")
         }
     }

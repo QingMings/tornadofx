@@ -2,6 +2,7 @@
 
 package tornadofx
 
+import javafx.beans.Observable
 import javafx.beans.binding.Bindings
 import javafx.beans.binding.BooleanBinding
 import javafx.beans.binding.BooleanExpression
@@ -19,16 +20,19 @@ import tornadofx.FX.Companion.runAndWait
 import java.time.LocalDate
 import java.util.*
 import java.util.concurrent.Callable
+import kotlin.collections.ArrayList
 import kotlin.reflect.KFunction
 import kotlin.reflect.KMutableProperty1
 import kotlin.reflect.KProperty1
+
+val viewModelBundle: ResourceBundle = ResourceBundle.getBundle("tornadofx/i18n/ViewModel")
 
 open class ViewModel : Component(), ScopedInstance {
     val propertyMap: ObservableMap<Property<*>, () -> Property<*>?> = FXCollections.observableHashMap<Property<*>, () -> Property<*>?>()
     val propertyCache: ObservableMap<Property<*>, Property<*>> = FXCollections.observableHashMap<Property<*>, Property<*>>()
     val externalChangeListeners: ObservableMap<Property<*>, ChangeListener<Any>> = FXCollections.observableHashMap<Property<*>, ChangeListener<Any>>()
     val dirtyProperties: ObservableList<ObservableValue<*>> = FXCollections.observableArrayList<ObservableValue<*>>()
-    val dirty = booleanBinding(dirtyProperties, dirtyProperties) { isNotEmpty() }
+    open val dirty = booleanBinding(dirtyProperties, dirtyProperties) { isNotEmpty() }
     @Deprecated("Use dirty property instead", ReplaceWith("dirty"))
     fun dirtyStateProperty() = dirty
 
@@ -37,10 +41,10 @@ open class ViewModel : Component(), ScopedInstance {
     val autocommitProperties = FXCollections.observableArrayList<ObservableValue<out Any>>()
 
     companion object {
-        val propertyToViewModel = WeakHashMap<ObservableValue<*>, ViewModel>()
-        val propertyToFacade = WeakHashMap<ObservableValue<*>, Property<*>>()
-        fun getViewModelForProperty(property: ObservableValue<*>): ViewModel? = propertyToViewModel[property]
-        fun getFacadeForProperty(property: ObservableValue<*>): Property<*>? = propertyToFacade[property]
+        val propertyToViewModel = WeakHashMap<Observable, ViewModel>()
+        val propertyToFacade = WeakHashMap<Observable, Property<*>>()
+        fun getViewModelForProperty(property: Observable): ViewModel? = propertyToViewModel[property]
+        fun getFacadeForProperty(property: Observable): Property<*>? = propertyToFacade[property]
 
         /**
          * Register the combination of a property that has been bound to a property
@@ -50,7 +54,7 @@ open class ViewModel : Component(), ScopedInstance {
         fun register(property: ObservableValue<*>, possiblyFacade: ObservableValue<*>?) {
             val propertyOwner = (possiblyFacade as? Property<*>)?.bean as? ViewModel
             if (propertyOwner != null) {
-                propertyToFacade[property] = possiblyFacade as Property<*>
+                propertyToFacade[property] = possiblyFacade
                 propertyToViewModel[property] = propertyOwner
             }
         }
@@ -62,7 +66,7 @@ open class ViewModel : Component(), ScopedInstance {
                 if (it.wasAdded()) {
                     it.addedSubList.forEach { facade ->
                         facade.addListener { obs, _, nv ->
-                            if (validate(fields = facade)) propertyMap[obs]!!.invoke()?.value = nv
+                            if (validate(fields = *arrayOf(facade))) propertyMap[obs]!!.invoke()?.value = nv
                         }
                     }
                 }
@@ -85,10 +89,10 @@ open class ViewModel : Component(), ScopedInstance {
      *     val name = bind { person.nameProperty() }
      *
      *     // Bind Kotlin var based property
-     *     val name = bind { person.observable(Person::name)
+     *     val name = bind { person.observable(Person::name) }
      *
      *     // Bind Java POJO getter/setter
-     *     val name = bind { person.observable(Person::getName, Person::setName)
+     *     val name = bind { person.observable(Person::getName, Person::setName) }
      *
      *     // Bind Java POJO by property name (not type safe)
      *     val name = bind { person.observable("name") }
@@ -96,60 +100,56 @@ open class ViewModel : Component(), ScopedInstance {
      * ```
      */
     @Suppress("UNCHECKED_CAST")
-    inline fun <reified PropertyType : Property<T>, reified T : Any, ResultType : PropertyType> bind(autocommit: Boolean = false, forceObjectProperty: Boolean = false, noinline propertyProducer: () -> PropertyType?): ResultType {
+    inline fun <reified PropertyType : Property<T>, reified T : Any, ResultType : PropertyType> bind(autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: T? = null, noinline propertyProducer: () -> PropertyType?): ResultType {
         val prop = propertyProducer()
-        val value = prop?.value
 
-        // Faster check where possible
-        var facade: Any? = null
+        val facade : Property<*> = if (forceObjectProperty) {
+            BindingAwareSimpleObjectProperty<T>(this, prop?.name)
+        } else {
+            val propertyType = PropertyType::class.java
+            val typeParam = T::class.java
 
-        // Avoid creating specialized type if requested
-        if (!forceObjectProperty) {
-            when (prop) {
-                is IntegerProperty -> facade = if (value != null) BindingAwareSimpleIntegerProperty(this, prop.name, value as Int) else BindingAwareSimpleIntegerProperty(this, prop.name)
-                is DoubleProperty -> facade = if (value != null) BindingAwareSimpleDoubleProperty(this, prop.name, value as Double) else BindingAwareSimpleDoubleProperty(this, prop.name)
-                is LongProperty -> facade = if (value != null) BindingAwareSimpleLongProperty(this, prop.name, value as Long) else BindingAwareSimpleLongProperty(this, prop.name)
-                is FloatProperty -> facade = if (value != null) BindingAwareSimpleFloatProperty(this, prop.name, value as Float) else BindingAwareSimpleFloatProperty(this, prop.name)
-                is BooleanProperty -> facade = if (value != null) BindingAwareSimpleBooleanProperty(this, prop.name, value as Boolean) else BindingAwareSimpleBooleanProperty(this, prop.name)
-                null -> {
-                    if (IntegerProperty::class.java.isAssignableFrom(PropertyType::class.java))
-                        facade = BindingAwareSimpleIntegerProperty(this, null)
-                    else if (DoubleProperty::class.java.isAssignableFrom(PropertyType::class.java))
-                        facade = BindingAwareSimpleDoubleProperty(this, null)
-                    else if (FloatProperty::class.java.isAssignableFrom(PropertyType::class.java))
-                        facade = BindingAwareSimpleFloatProperty(this, null)
-                    else if (BooleanProperty::class.java.isAssignableFrom(PropertyType::class.java))
-                        facade = BindingAwareSimpleBooleanProperty(this, null)
-                }
+            // Match PropertyType against known Property types first
+            when {
+                IntegerProperty::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleIntegerProperty(this, prop?.name)
+                LongProperty::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleLongProperty(this, prop?.name)
+                DoubleProperty::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleDoubleProperty(this, prop?.name)
+                FloatProperty::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleFloatProperty(this, prop?.name)
+                BooleanProperty::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleBooleanProperty(this, prop?.name)
+                StringProperty::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleStringProperty(this, prop?.name)
+                ObservableList::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleListProperty<T>(this, prop?.name)
+                List::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleListProperty<T>(this, prop?.name)
+                ObservableSet::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleSetProperty<T>(this, prop?.name)
+                Set::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleSetProperty<T>(this, prop?.name)
+                Map::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleMapProperty<Any, Any>(this, prop?.name)
+                ObservableMap::class.java.isAssignableFrom(propertyType) -> BindingAwareSimpleMapProperty<Any, Any>(this, prop?.name)
+
+            // Match against the type of the Property
+                java.lang.Integer::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleIntegerProperty(this, prop?.name)
+                java.lang.Long::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleLongProperty(this, prop?.name)
+                java.lang.Double::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleDoubleProperty(this, prop?.name)
+                java.lang.Float::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleFloatProperty(this, prop?.name)
+                java.lang.Boolean::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleBooleanProperty(this, prop?.name)
+                java.lang.String::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleStringProperty(this, prop?.name)
+                ObservableList::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleListProperty<T>(this, prop?.name)
+                List::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleListProperty<T>(this, prop?.name)
+                ObservableSet::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleSetProperty<T>(this, prop?.name)
+                Set::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleSetProperty<T>(this, prop?.name)
+                Map::class.java.isAssignableFrom(typeParam) -> BindingAwareSimpleMapProperty<Any,Any>(this, prop?.name)
+
+            // Default to Object wrapper
+                else -> BindingAwareSimpleObjectProperty<T>(this, prop?.name)
             }
         }
 
-        if (facade == null) {
-            if (forceObjectProperty) {
-                facade = if (value != null) BindingAwareSimpleObjectProperty(this, prop.name, value) else BindingAwareSimpleObjectProperty(this, prop?.name)
-            } else {
-                facade = when (T::class.javaPrimitiveType ?: T::class) {
-                    Int::class.javaPrimitiveType -> if (value != null) BindingAwareSimpleIntegerProperty(this, prop.name, value as Int) else BindingAwareSimpleIntegerProperty(this, prop?.name)
-                    Long::class.javaPrimitiveType -> if (value != null) BindingAwareSimpleLongProperty(this, prop.name, value as Long) else BindingAwareSimpleLongProperty(this, prop?.name)
-                    Double::class.javaPrimitiveType -> if (value != null) BindingAwareSimpleDoubleProperty(this, prop.name, value as Double) else BindingAwareSimpleDoubleProperty(this, prop?.name)
-                    Float::class.javaPrimitiveType -> if (value != null) BindingAwareSimpleFloatProperty(this, prop.name, value as Float) else BindingAwareSimpleFloatProperty(this, prop?.name)
-                    Boolean::class.javaPrimitiveType -> if (value != null) BindingAwareSimpleBooleanProperty(this, prop.name, value as Boolean) else BindingAwareSimpleBooleanProperty(this, prop?.name)
-                    String::class -> if (value != null) BindingAwareSimpleStringProperty(this, prop.name, value as String) else BindingAwareSimpleStringProperty(this, prop?.name)
-                    is ObservableList<*> -> if (value != null) SimpleListProperty(this, prop.name, value as ObservableList<T>) else SimpleListProperty(this, prop?.name)
-                    is ObservableSet<*> -> if (value != null) SimpleSetProperty(this, prop.name, value as ObservableSet<T>) else SimpleSetProperty(this, prop?.name)
-                    is List<*> -> if (value != null) SimpleListProperty(this, prop.name, (value as List<T>).observable()) else SimpleListProperty(this, prop?.name)
-                    is Set<*> -> if (value != null) SimpleSetProperty(this, prop.name, (value as Set<T>).observable()) else SimpleSetProperty(this, prop?.name)
-                    else -> if (value != null) BindingAwareSimpleObjectProperty(this, prop.name, value) else BindingAwareSimpleObjectProperty(this, prop?.name)
-                }
-            }
-        }
+        assignValue(facade, prop, defaultValue)
 
-        (facade as Property<*>).addListener(dirtyListener)
+        facade.addListener(dirtyListener)
         propertyMap[facade] = propertyProducer
         propertyCache[facade] = prop
 
         // Listener that can track external changes for this facade
-        externalChangeListeners[facade] = ChangeListener<Any> { observableValue, ov, nv ->
+        externalChangeListeners[facade] = ChangeListener<Any> { _, _, nv ->
             val facadeProperty = (facade as Property<Any>)
             if (!facadeProperty.isBound)
                 facadeProperty.value = nv
@@ -164,15 +164,15 @@ open class ViewModel : Component(), ScopedInstance {
         return facade as ResultType
     }
 
-    inline fun <reified T : Any> property(autocommit: Boolean = false, forceObjectProperty: Boolean = false, noinline op: () -> Property<T>) = PropertyDelegate(bind(autocommit, forceObjectProperty, op))
+    inline fun <reified T : Any> property(autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: T? = null, noinline op: () -> Property<T>) = PropertyDelegate(bind(autocommit, forceObjectProperty, defaultValue, op))
 
-    val dirtyListener: ChangeListener<Any> = ChangeListener { property, oldValue, newValue ->
-        if (ignoreDirtyStateProperties.contains(property!!)) return@ChangeListener
+    val dirtyListener: ChangeListener<Any> = ChangeListener { property, _, newValue ->
+        if (property!! in ignoreDirtyStateProperties) return@ChangeListener
 
-        if (dirtyProperties.contains(property)) {
-            val sourceValue = propertyMap[property]!!.invoke()?.value
-            if (sourceValue == newValue) dirtyProperties.remove(property)
-        } else if (!autocommitProperties.contains(property)) {
+        val sourceValue = propertyMap[property]!!.invoke()?.value
+        if (sourceValue == newValue) {
+            dirtyProperties.remove(property)
+        } else if (property !in autocommitProperties && property !in dirtyProperties) {
             dirtyProperties.add(property)
         }
     }
@@ -182,6 +182,8 @@ open class ViewModel : Component(), ScopedInstance {
 
     fun validate(focusFirstError: Boolean = true, decorateErrors: Boolean = true, vararg fields: ObservableValue<*>): Boolean =
             validationContext.validate(focusFirstError, decorateErrors, *fields)
+
+    fun clearDecorators() = validationContext.validate(focusFirstError = false, decorateErrors = false)
 
     /**
      * This function is called after a successful commit, right before the optional successFn call sent to the commit
@@ -201,7 +203,7 @@ open class ViewModel : Component(), ScopedInstance {
 
     }
 
-    fun commit(vararg fields: ObservableValue<*>, successFn: (() -> Unit)? = null) =
+    fun commit(vararg fields: ObservableValue<*>, successFn: () -> Unit = {}) =
             commit(false, true, fields = *fields, successFn = successFn)
 
     /**
@@ -211,7 +213,7 @@ open class ViewModel : Component(), ScopedInstance {
      *
      * @param force Force flush even if validation fails
      */
-    fun commit(force: Boolean = false, focusFirstError: Boolean = true, vararg fields: ObservableValue<*>, successFn: (() -> Unit)? = null): Boolean {
+    fun commit(force: Boolean = false, focusFirstError: Boolean = true, vararg fields: ObservableValue<*>, successFn: () -> Unit = {}): Boolean {
         var committed = true
 
         val commits = mutableListOf<Commit>()
@@ -235,16 +237,27 @@ open class ViewModel : Component(), ScopedInstance {
         if (committed) {
             onCommit()
             onCommit(commits)
-            successFn?.invoke()
+            successFn.invoke()
         }
         return committed
     }
 
+    fun markDirty(property: ObservableValue<*>) {
+        require(propertyMap.containsKey(property)){"The property $property is not a facade of this ViewModel ($this)"}
+        dirtyProperties+=property
+    }
+
+    /**
+     * Rollback all or the specified fields
+     */
     @Suppress("UNCHECKED_CAST")
-    fun rollback() {
+    fun rollback(vararg fields: Property<*>) {
         runAndWait {
-            for ((facade, propExtractor) in propertyMap) {
-                val prop = propExtractor()
+            val rollbackThese = if (fields.isNotEmpty()) fields.toList() else propertyMap.keys
+
+            for (facade in rollbackThese) {
+                val prop: Property<*>? = propertyMap[facade]?.invoke()
+
                 // Rebind external change listener in case the source property changed
                 val oldProp = propertyCache[facade]
                 if (oldProp != prop) {
@@ -254,9 +267,24 @@ open class ViewModel : Component(), ScopedInstance {
                     prop?.addListener(extListener)
                     propertyCache[facade] = prop
                 }
-                facade.value = prop?.value
+                assignValue(facade, prop)
             }
             dirtyProperties.clear()
+        }
+    }
+
+    fun assignValue(facade: Property<*>, prop: Property<*>?, defaultValue: Any? = null) {
+        facade.value = prop?.value ?: defaultValue
+
+        // Never allow null collection values
+        if (facade.value == null) {
+            when (facade) {
+                is ListProperty<*> -> facade.value = FXCollections.observableArrayList()
+                is SetProperty<*> -> facade.value = FXCollections.observableSet()
+                is MapProperty<*, *> -> facade.value = FXCollections.observableHashMap()
+                is MutableList<*> -> facade.value = ArrayList<Any>()
+                is MutableMap<*, *> -> facade.value = HashMap<Any, Any>()
+            }
         }
     }
 
@@ -288,7 +316,7 @@ open class ViewModel : Component(), ScopedInstance {
         fun updateMatchingValidators() {
             matchingValidators.setAll(validationContext.validators.filter {
                 val facade = it.property.viewModelFacade
-                facade != null && fields.contains(facade)
+                facade != null && facade in fields
             })
         }
 
@@ -324,9 +352,9 @@ val <T> Property<T>.isNotDirty: Boolean get() = !isDirty
  * Listen to changes in the given observable and call the op with the new value on change.
  * After each change the viewmodel is rolled back to reflect the values in the new source object or objects.
  */
-fun <V : ViewModel, T> V.rebindOnChange(observable: ObservableValue<T>, op: (V.(T?) -> Unit)? = null) {
-    observable.addListener { observableValue, oldValue, newValue ->
-        op?.invoke(this, newValue)
+fun <V : ViewModel, T> V.rebindOnChange(observable: ObservableValue<T>, op: V.(T?) -> Unit = {}) {
+    observable.addListener { _, _, newValue ->
+        op(this, newValue)
         rollback()
     }
 }
@@ -334,18 +362,32 @@ fun <V : ViewModel, T> V.rebindOnChange(observable: ObservableValue<T>, op: (V.(
 /**
  * Rebind the itemProperty of the ViewModel when the itemProperty in the ListCellFragment changes.
  */
-fun <V : ItemViewModel<T>, T> V.bindTo(listCellFragment: ListCellFragment<T>): V {
-    itemProperty.bind(listCellFragment.itemProperty)
-    return this
+fun <V : ItemViewModel<T>, T> V.bindTo(itemFragment: ItemFragment<T>) = apply {
+    itemProperty.bind(itemFragment.itemProperty)
+}
+
+/**
+ * Rebind the itemProperty of the ViewModel when the itemProperty in the TableCellFragment changes.
+ * TODO: Do we need this, or can we just use the one above?
+ */
+fun <V : ItemViewModel<T>, S, T> V.bindToItem(cellFragment: TableCellFragment<S, T>) = apply {
+    itemProperty.bind(cellFragment.itemProperty)
+}
+
+/**
+ * Rebind the rowItemProperty of the ViewModel when the itemProperty in the TableCellFragment changes.
+ */
+fun <V : ItemViewModel<S>, S, T> V.bindToRowItem(cellFragment: TableCellFragment<S, T>) = apply {
+    itemProperty.bind(cellFragment.rowItemProperty)
 }
 
 fun <V : ViewModel, T : ObservableValue<X>, X> V.dirtyStateFor(modelField: KProperty1<V, T>): BooleanBinding {
     val prop = modelField.get(this)
-    return Bindings.createBooleanBinding(Callable { dirtyProperties.contains(prop) }, dirtyProperties)
+    return Bindings.createBooleanBinding(Callable { prop in dirtyProperties }, dirtyProperties)
 }
 
 fun <V : ViewModel, T> V.rebindOnTreeItemChange(observable: ObservableValue<TreeItem<T>>, op: V.(T?) -> Unit) {
-    observable.addListener { observableValue, oldValue, newValue ->
+    observable.addListener { _, _, newValue ->
         op(newValue?.value)
         rollback()
     }
@@ -380,13 +422,14 @@ fun <T : ViewModel> T.rebind(op: (T.() -> Unit)) {
  * tracks focus on the supplied node while OnChange tracks changes to the property itself.
  */
 inline fun <reified T> Property<T>.addValidator(node: Node, trigger: ValidationTrigger = ValidationTrigger.OnChange(), noinline validator: ValidationContext.(T?) -> ValidationMessage?)
-        = (bean as? ViewModel)?.addValidator(node, this, trigger, validator)
-        ?: throw IllegalArgumentException("The addValidator extension on Property can only be used on properties inside a ViewModel. Use validator.addValidator() instead.")
+        = requireNotNull(bean as? ViewModel){"The addValidator extension on Property can only be used on properties inside a ViewModel. Use validator.addValidator() instead."}
+        .addValidator(node, this, trigger, validator)
 
-fun TextInputControl.required(trigger: ValidationTrigger = ValidationTrigger.OnChange(), message: String? = "This field is required")
+
+fun TextInputControl.required(trigger: ValidationTrigger = ValidationTrigger.OnChange(), message: String? = viewModelBundle["required"])
         = validator(trigger) { if (it.isNullOrBlank()) error(message) else null }
 
-inline fun <reified T> ComboBoxBase<T>.required(trigger: ValidationTrigger = ValidationTrigger.OnChange(), message: String? = "This field is required")
+inline fun <reified T> ComboBoxBase<T>.required(trigger: ValidationTrigger = ValidationTrigger.OnChange(), message: String? = viewModelBundle["required"])
         = validator(trigger) { if (it == null) error(message) else null }
 
 /**
@@ -447,11 +490,13 @@ fun RadioButton.validator(trigger: ValidationTrigger = ValidationTrigger.OnChang
  * Add a validator to the given Control for the given model property.
  */
 inline fun <reified T> validator(control: Control, property: Property<T>, trigger: ValidationTrigger, model: ViewModel? = null, noinline validator: ValidationContext.(T?) -> ValidationMessage?)
-        = (model ?: property.viewModel)?.addValidator(control, property, trigger, validator)
-        ?: throw IllegalArgumentException("The addValidator extension can only be used on inputs that are already bound bidirectionally to a property in a Viewmodel. Use validator.addValidator() instead or make the property's bean field point to a ViewModel.")
+        = requireNotNull(model ?: property.viewModel){
+    "The addValidator extension can only be used on inputs that are already bound bidirectionally to a property in a Viewmodel. " +
+            "Use validator.addValidator() instead or make the property's bean field point to a ViewModel."
+        }.addValidator(control, property, trigger, validator)
 
 inline fun <reified T> validator(control: Control, property: Property<T>, trigger: ValidationTrigger, noinline validator: ValidationContext.(T?) -> ValidationMessage?)
-    = validator(control, property, trigger, null, validator)
+        = validator(control, property, trigger, null, validator)
 
 /**
  * Extract the ViewModel from a property that is bound towards a ViewModel Facade
@@ -482,30 +527,39 @@ open class ItemViewModel<T> @JvmOverloads constructor(initialValue: T? = null, v
             task { func() } success { if (itemProperty.isBound && item is JsonModel) (item as JsonModel).update(it as JsonModel) else item = it }
 
     @JvmName("bindField")
-    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KProperty1<T, N>, autocommit: Boolean = false, forceObjectProperty: Boolean = false): ReturnType
-            = bind(autocommit, forceObjectProperty) { item?.let { property.get(it).toProperty() } }
+    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KProperty1<T, N?>, autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: N? = null): ReturnType
+            = bind(autocommit, forceObjectProperty, defaultValue) { item?.let { property.get(it).toProperty() } }
 
     @JvmName("bindMutableField")
-    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KMutableProperty1<T, N>, autocommit: Boolean = false, forceObjectProperty: Boolean = false): ReturnType
-            = bind(autocommit, forceObjectProperty) { item?.observable(property) }
+    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KMutableProperty1<T, N>, autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: N? = null): ReturnType
+            = bind(autocommit, forceObjectProperty, defaultValue) { item?.observable(property) }
+
+    @JvmName("bindMutableNullableField")
+    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KMutableProperty1<T, N?>, autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: N? = null): ReturnType
+            = bind(autocommit, forceObjectProperty, defaultValue) { (item?.observable(property) ?: SimpleObjectProperty<N>()) as Property<N> }
 
     @JvmName("bindProperty")
-    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KProperty1<T, Property<N>>, autocommit: Boolean = false, forceObjectProperty: Boolean = false): ReturnType
-            = bind(autocommit, forceObjectProperty) { item?.let { property.get(it) } }
+    inline fun <reified N : Any, reified PropertyType : Property<N>, ReturnType : PropertyType> bind(property: KProperty1<T, PropertyType>, autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: N? = null): ReturnType
+            = bind(autocommit, forceObjectProperty, defaultValue) { item?.let { property.get(it) } }
 
     @JvmName("bindMutableProperty")
-    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KMutableProperty1<T, Property<N>>, autocommit: Boolean = false, forceObjectProperty: Boolean = false): ReturnType
+    inline fun <reified N : Any, reified PropertyType : Property<N>, ReturnType : PropertyType> bind(property: KMutableProperty1<T, PropertyType>, autocommit: Boolean = false, forceObjectProperty: Boolean = false): ReturnType
             = bind(autocommit, forceObjectProperty) { item?.observable(property) } as ReturnType
 
     @JvmName("bindGetter")
-    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KFunction<N>, autocommit: Boolean = false, forceObjectProperty: Boolean = false): ReturnType
-            = bind(autocommit, forceObjectProperty) { item?.let { property.call(it).toProperty() } }
+    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KFunction<N>, autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: N? = null): ReturnType
+            = bind(autocommit, forceObjectProperty, defaultValue) { item?.let { property.call(it).toProperty() } }
 
     @JvmName("bindPropertyFunction")
-    inline fun <reified N : Any, ReturnType : Property<N>> bind(property: KFunction<Property<N>>, autocommit: Boolean = false, forceObjectProperty: Boolean = false): ReturnType
-            = bind(autocommit, forceObjectProperty) { item?.let { property.call(it) } }
+    inline fun <reified N : Any, reified PropertyType : Property<N>, ReturnType : PropertyType> bind(property: KFunction<PropertyType>, autocommit: Boolean = false, forceObjectProperty: Boolean = false, defaultValue: N? = null): ReturnType
+            = bind(autocommit, forceObjectProperty, defaultValue) { item?.let { property.call(it) } }
 }
 
 class Commit(val property: ObservableValue<*>, val oldValue: Any?, val newValue: Any?) {
     val changed: Boolean get() = oldValue != newValue
 }
+
+/**
+ * Mark this ViewModel facade property as dirty in it's owning ViewModel.
+ */
+fun Property<*>.markDirty() = viewModel?.markDirty(this)

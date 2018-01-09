@@ -18,8 +18,11 @@ import javafx.scene.input.KeyEvent
 import javafx.scene.layout.BorderStrokeStyle
 import javafx.scene.paint.Color
 import javafx.scene.text.FontWeight
+import java.util.*
 
 abstract class Wizard @JvmOverloads constructor(title: String? = null, heading: String? = null) : View(title) {
+    private val wizardBundle: ResourceBundle = ResourceBundle.getBundle("tornadofx/i18n/Wizard")
+
     val pages: ObservableList<UIComponent> = FXCollections.observableArrayList<UIComponent>()
 
     val currentPageProperty = SimpleObjectProperty<UIComponent>()
@@ -40,11 +43,11 @@ abstract class Wizard @JvmOverloads constructor(title: String? = null, heading: 
     open val canGoNext: BooleanExpression = hasNext
     open val canGoBack: BooleanExpression = hasPrevious
 
-    val stepsTextProperty = SimpleStringProperty("Steps")
-    val backButtonTextProperty = SimpleStringProperty("< _Back")
-    val nextButtonTextProperty = SimpleStringProperty("_Next >")
-    val finishButtonTextProperty = SimpleStringProperty("_Finish")
-    val cancelButtonTextProperty = SimpleStringProperty("_Cancel")
+    val stepsTextProperty = SimpleStringProperty(wizardBundle["steps"])
+    val backButtonTextProperty = SimpleStringProperty(wizardBundle["back"])
+    val nextButtonTextProperty = SimpleStringProperty(wizardBundle["next"])
+    val finishButtonTextProperty = SimpleStringProperty(wizardBundle["finish"])
+    val cancelButtonTextProperty = SimpleStringProperty(wizardBundle["cancel"])
 
     val showStepsHeaderProperty = SimpleBooleanProperty(true)
     var showStepsHeader by showStepsHeaderProperty
@@ -86,12 +89,12 @@ abstract class Wizard @JvmOverloads constructor(title: String? = null, heading: 
         top {
             hbox {
                 addClass(WizardStyles.header)
-                removeWhen { showHeaderProperty.not() }
+                removeWhen(showHeaderProperty.not())
                 vbox(5) {
                     label(titleProperty)
                     label(headingProperty) {
                         addClass(WizardStyles.heading)
-                        visibleWhen { titleProperty.isEqualTo(headingProperty).not() }
+                        visibleWhen(titleProperty.isEqualTo(headingProperty).not())
                     }
                 }
                 spacer()
@@ -146,13 +149,15 @@ abstract class Wizard @JvmOverloads constructor(title: String? = null, heading: 
                 addClass(WizardStyles.buttons)
                 button(type = ButtonBar.ButtonData.BACK_PREVIOUS) {
                     textProperty().bind(backButtonTextProperty)
-                    enableWhen { canGoBack }
+                    runLater {
+                        enableWhen(canGoBack)
+                    }
                     action { back() }
                 }
                 button(type = ButtonBar.ButtonData.NEXT_FORWARD) {
                     textProperty().bind(nextButtonTextProperty)
-                    Platform.runLater {
-                        enableWhen { canGoNext.and(hasNext) }
+                    runLater {
+                        enableWhen(canGoNext.and(hasNext))
                     }
                     action { next() }
                 }
@@ -162,8 +167,8 @@ abstract class Wizard @JvmOverloads constructor(title: String? = null, heading: 
                 }
                 button(type = ButtonBar.ButtonData.FINISH) {
                     textProperty().bind(finishButtonTextProperty)
-                    Platform.runLater {
-                        enableWhen { canFinish }
+                    runLater {
+                        enableWhen(canFinish)
                     }
                     action {
                         currentPage.onSave()
@@ -193,7 +198,7 @@ abstract class Wizard @JvmOverloads constructor(title: String? = null, heading: 
     }
 
     init {
-        importStylesheet(WizardStyles::class)
+        importStylesheet<WizardStyles>()
         this.heading = heading ?: ""
         currentPageProperty.addListener { _, oldPage, newPage ->
             if (newPage != null) {

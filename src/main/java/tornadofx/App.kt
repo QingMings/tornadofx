@@ -4,7 +4,6 @@ import javafx.application.Application
 import javafx.application.Platform
 import javafx.scene.Scene
 import javafx.scene.image.Image
-import javafx.scene.layout.Pane
 import javafx.stage.Stage
 import java.awt.*
 import java.awt.event.MouseAdapter
@@ -21,16 +20,17 @@ import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty
 
-open class App(primaryView: KClass<out UIComponent>? = null, vararg stylesheet: KClass<out Stylesheet>) : Application(), Configurable {
+open class App(open val primaryView: KClass<out UIComponent> = NoPrimaryViewSpecified::class, vararg stylesheet: KClass<out Stylesheet>) : Application(), Configurable {
     var scope: Scope = DefaultScope
     val workspace: Workspace get() = scope.workspace
+
+    constructor() : this(NoPrimaryViewSpecified::class)
 
     /**
      * Path to app/global configuration settings. Defaults to app.properties inside
      * the configured configBasePath (By default conf in the current directory).
      */
-    override val config: Properties by lazy { loadConfig() }
-    inline fun <reified M : JsonModel> Properties.jsonModel(key: String) = jsonObject(key)?.toModel<M>()
+    override val config: ConfigProperties by lazy { loadConfig() }
 
     /**
      * Default path for configuration. All components will by default
@@ -53,23 +53,26 @@ open class App(primaryView: KClass<out UIComponent>? = null, vararg stylesheet: 
         FX.eventbus.fire(event)
     }
 
-    constructor(primaryView: KClass<out UIComponent>? = null, stylesheet: KClass<out Stylesheet>, scope: Scope = DefaultScope) : this(primaryView, *arrayOf(stylesheet)) {
+    constructor(primaryView: KClass<out UIComponent> = NoPrimaryViewSpecified::class, stylesheet: KClass<out Stylesheet>, scope: Scope = DefaultScope) : this(primaryView, *arrayOf(stylesheet)) {
         this.scope = scope
     }
 
-    constructor(icon: Image, primaryView: KClass<out UIComponent>? = null, vararg stylesheet: KClass<out Stylesheet>) : this(primaryView, *stylesheet) {
+    constructor(icon: Image, primaryView: KClass<out UIComponent> = NoPrimaryViewSpecified::class, vararg stylesheet: KClass<out Stylesheet>) : this(primaryView, *stylesheet) {
         addStageIcon(icon, scope)
     }
-
-    constructor() : this(null)
-
-    open val primaryView: KClass<out UIComponent> = primaryView ?: DeterminedByParameter::class
 
     fun <T : Any> k(javaClass: Class<T>): KClass<T> = javaClass.kotlin
 
     init {
         Stylesheet.importServiceLoadedStylesheets()
         stylesheet.forEach { importStylesheet(it) }
+        importChildInterceptors()
+    }
+
+    private fun importChildInterceptors() {
+        ServiceLoader.load(ChildInterceptor::class.java).forEach {
+            FX.addChildInterceptor(it)
+        }
     }
 
     override fun start(stage: Stage) {
@@ -80,7 +83,7 @@ open class App(primaryView: KClass<out UIComponent>? = null, vararg stylesheet: 
             val view = find(primaryViewType, scope)
 
             @Suppress("UNCHECKED_CAST")
-            if (view is Workspace) FX.defaultWorkspace = primaryViewType as KClass<Workspace>
+            (view as? Workspace)?.let { FX.defaultWorkspace = primaryViewType as KClass<Workspace> }
 
             stage.apply {
                 view.muteDocking = true
@@ -92,7 +95,7 @@ open class App(primaryView: KClass<out UIComponent>? = null, vararg stylesheet: 
                 onBeforeShow(view)
                 view.muteDocking = false
                 view.callOnDock()
-                if (shouldShowPrimaryStage()) show()
+                if (view !is NoPrimaryViewSpecified && shouldShowPrimaryStage()) show()
             }
             FX.initialized.value = true
         } catch (ex: Exception) {
@@ -106,6 +109,8 @@ open class App(primaryView: KClass<out UIComponent>? = null, vararg stylesheet: 
 
     override fun stop() {
         scope.deregister()
+        tfxThreadPool.shutdown()
+        tfxDaemonThreadPool.shutdown()
         trayIcons.forEach {
             SwingUtilities.invokeLater { SystemTray.getSystemTray().remove(it) }
         }
@@ -117,31 +122,28 @@ open class App(primaryView: KClass<out UIComponent>? = null, vararg stylesheet: 
 
     @Suppress("UNCHECKED_CAST")
     private fun determinePrimaryView(): KClass<out UIComponent> {
-        if (primaryView == DeterminedByParameter::class) {
-            val viewClassName = parameters.named?.get("view-class") ?: throw IllegalArgumentException("No provided --view-class parameter and primaryView was not overridden. Choose one strategy to specify the primary View")
+        if (primaryView == NoPrimaryViewSpecified::class) {
+            val viewClassName = parameters.named?.get("view-class") ?: return NoPrimaryViewSpecified::class
             val viewClass = Class.forName(viewClassName)
-            if (UIComponent::class.java.isAssignableFrom(viewClass)) return viewClass.kotlin as KClass<out UIComponent>
-            throw IllegalArgumentException("Class specified by --class-name is not a subclass of tornadofx.View")
-         } else {
+
+            require(UIComponent::class.java.isAssignableFrom(viewClass)) { "Class specified by --class-name is not a subclass of tornadofx.View" }
+            return viewClass.kotlin as KClass<out UIComponent>
+        } else {
             return primaryView
         }
     }
 
     @Suppress("UNCHECKED_CAST")
-    inline fun <reified T> inject(scope: Scope = DefaultScope): ReadOnlyProperty<App, T> where T : Component, T: ScopedInstance = object : ReadOnlyProperty<App, T> {
-        override fun getValue(thisRef: App, property: KProperty<*>) = find(T::class, scope)
+    inline fun <reified T> inject(scope: Scope = DefaultScope): ReadOnlyProperty<App, T> where T : Component, T : ScopedInstance = object : ReadOnlyProperty<App, T> {
+        override fun getValue(thisRef: App, property: KProperty<*>) = find<T>(scope)
     }
 
-    class DeterminedByParameter : View() {
-        override val root = Pane()
-    }
-
-    fun trayicon(image: BufferedImage, tooltip: String?, implicitExit: Boolean = false, autoSize: Boolean = false, op: TrayIcon.() -> Unit){
+    fun trayicon(image: BufferedImage, tooltip: String?, implicitExit: Boolean = false, autoSize: Boolean = false, op: TrayIcon.() -> Unit) {
         Platform.setImplicitExit(implicitExit)
         SwingUtilities.invokeLater {
             Toolkit.getDefaultToolkit()
             val trayIcon = TrayIcon(image, tooltip)
-            trayIcon.isImageAutoSize= autoSize
+            trayIcon.isImageAutoSize = autoSize
             op(trayIcon)
             SystemTray.getSystemTray().add(trayIcon)
             trayIcons.add(trayIcon)
@@ -193,3 +195,24 @@ open class App(primaryView: KClass<out UIComponent>? = null, vararg stylesheet: 
     }
 
 }
+
+/**
+ * This is the default primary view parameter. It is used to signal that there
+ * is no primary view configured for the application and so the App start process
+ * should not show the primary stage upon startup, unless the --view-class parameter
+ * was passed on the command line.
+ *
+ * If no primary view is shown, the developer must use either the start() hook or some
+ * other means of determinining that the application has started. This would be good
+ * for applications where the default view depends upon some state, or where the app
+ * simply starts with a tray icon.
+ *
+ */
+class NoPrimaryViewSpecified : View() {
+    override val root = stackpane()
+}
+
+inline fun <reified T : Application> launch(vararg args: String) = Application.launch(T::class.java, *args)
+
+@JvmName("launchWithArrayArgs")
+inline fun <reified T : Application> launch(args: Array<String>) = Application.launch(T::class.java, *args)

@@ -5,6 +5,8 @@ package tornadofx
 import javafx.beans.WeakListener
 import javafx.collections.ListChangeListener
 import javafx.collections.ObservableList
+import javafx.collections.ObservableSet
+import javafx.collections.SetChangeListener
 import tornadofx.FX.IgnoreParentBuilder.No
 import tornadofx.FX.IgnoreParentBuilder.Once
 import java.lang.ref.WeakReference
@@ -14,6 +16,7 @@ import java.util.*
  * Moves the given **T** item to the specified index
  */
 fun <T> MutableList<T>.move(item: T, newIndex: Int) {
+    check(newIndex in 0 until size)
     val currentIndex = indexOf(item)
     if (currentIndex < 0) return
     removeAt(currentIndex)
@@ -24,19 +27,18 @@ fun <T> MutableList<T>.move(item: T, newIndex: Int) {
  * Moves the given item at the `oldIndex` to the `newIndex`
  */
 fun <T> MutableList<T>.moveAt(oldIndex: Int, newIndex: Int) {
+    check(oldIndex in 0 until size)
+    check(newIndex in 0 until size)
     val item = this[oldIndex]
     removeAt(oldIndex)
-    if (oldIndex > newIndex)
-        add(newIndex, item)
-    else
-        add(newIndex - 1, item)
+    add(newIndex, item)
 }
 
 /**
  * Moves all items meeting a predicate to the given index
  */
 fun <T> MutableList<T>.moveAll(newIndex: Int, predicate: (T) -> Boolean) {
-    check(newIndex >= 0 && newIndex < size)
+    check(newIndex in 0 until size)
     val split = partition(predicate)
     clear()
     addAll(split.second)
@@ -49,8 +51,8 @@ fun <T> MutableList<T>.moveAll(newIndex: Int, predicate: (T) -> Boolean) {
  */
 fun <T> MutableList<T>.moveUpAt(index: Int) {
     if (index == 0) return
-    if (index < 0 || index >= size) throw Exception("Invalid index $index for MutableList of size $size")
-    val newIndex = index + 1
+    check(index in indices, { "Invalid index $index for MutableList of size $size" })
+    val newIndex = index - 1
     val item = this[index]
     removeAt(index)
     add(newIndex, item)
@@ -62,8 +64,8 @@ fun <T> MutableList<T>.moveUpAt(index: Int) {
  */
 fun <T> MutableList<T>.moveDownAt(index: Int) {
     if (index == size - 1) return
-    if (index < 0 || index >= size) throw Exception("Invalid index $index for MutableList of size $size")
-    val newIndex = index - 1
+    check(index in indices, { "Invalid index $index for MutableList of size $size" })
+    val newIndex = index + 1
     val item = this[index]
     removeAt(index)
     add(newIndex, item)
@@ -167,14 +169,41 @@ fun <SourceType, TargetType> MutableList<TargetType>.bind(sourceList: Observable
         }
     }
     val listener = ListConversionListener(this, ignoringParentConverter)
-    if (this is ObservableList<*>) {
-        (this as ObservableList<TargetType>).setAll(sourceList.map(ignoringParentConverter))
-    } else {
+    (this as?  ObservableList<TargetType>)?.setAll(sourceList.map(ignoringParentConverter)) ?: run {
         clear()
         addAll(sourceList.map(ignoringParentConverter))
     }
     sourceList.removeListener(listener)
     sourceList.addListener(listener)
+    return listener
+}
+
+/**
+ * Bind this list to the given observable list by converting them into the correct type via the given converter.
+ * Changes to the observable list are synced.
+ */
+fun <SourceType, TargetType> MutableList<TargetType>.bind(sourceSet: ObservableSet<SourceType>, converter: (SourceType) -> TargetType): SetConversionListener<SourceType, TargetType> {
+    val ignoringParentConverter: (SourceType) -> TargetType = {
+        FX.ignoreParentBuilder = Once
+        try {
+            converter(it)
+        } finally {
+            FX.ignoreParentBuilder = No
+        }
+    }
+    val listener = SetConversionListener(this, ignoringParentConverter)
+    if (this is ObservableList<*>) {
+        sourceSet.forEach { source ->
+            val converted = ignoringParentConverter(source)
+            listener.sourceToTarget[source] = converted
+        }
+        (this as ObservableList<TargetType>).setAll(listener.sourceToTarget.values)
+    } else {
+        clear()
+        addAll(sourceSet.map(ignoringParentConverter))
+    }
+    sourceSet.removeListener(listener)
+    sourceSet.addListener(listener)
     return listener
 }
 
@@ -218,6 +247,51 @@ class ListConversionListener<SourceType, TargetType>(targetList: MutableList<Tar
         val ourList = targetRef.get() ?: return false
 
         if (other is ListConversionListener<*, *>) {
+            val otherList = other.targetRef.get()
+            return ourList === otherList
+        }
+        return false
+    }
+}
+
+/**
+ * Listens to changes on a set of SourceType and keeps the target list in sync by converting
+ * each object into the TargetType via the supplied converter.
+ */
+class SetConversionListener<SourceType, TargetType>(targetList: MutableList<TargetType>, val converter: (SourceType) -> TargetType) : SetChangeListener<SourceType>, WeakListener {
+    internal val targetRef: WeakReference<MutableList<TargetType>> = WeakReference(targetList)
+    internal val sourceToTarget = HashMap<SourceType, TargetType>()
+
+    override fun onChanged(change: SetChangeListener.Change<out SourceType>) {
+        val list = targetRef.get()
+        if (list == null) {
+            change.set.removeListener(this)
+            sourceToTarget.clear()
+        } else {
+            if (change.wasRemoved()) {
+                list.remove(sourceToTarget[change.elementRemoved])
+                sourceToTarget.remove(change.elementRemoved)
+            }
+            if (change.wasAdded()) {
+                val converted = converter(change.elementAdded)
+                sourceToTarget[change.elementAdded] = converted
+                list.add(converted)
+            }
+        }
+    }
+
+    override fun wasGarbageCollected() = targetRef.get() == null
+
+    override fun hashCode() = targetRef.get()?.hashCode() ?: 0
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) {
+            return true
+        }
+
+        val ourList = targetRef.get() ?: return false
+
+        if (other is SetConversionListener<*, *>) {
             val otherList = other.targetRef.get()
             return ourList === otherList
         }

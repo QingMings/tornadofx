@@ -16,10 +16,7 @@ import javafx.collections.ListChangeListener
 import javafx.collections.ObservableList
 import javafx.css.PseudoClass
 import javafx.event.EventTarget
-import javafx.geometry.HPos
-import javafx.geometry.Insets
-import javafx.geometry.Pos
-import javafx.geometry.VPos
+import javafx.geometry.*
 import javafx.scene.Node
 import javafx.scene.Parent
 import javafx.scene.Scene
@@ -46,7 +43,9 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.*
+import java.util.function.UnaryOperator
 import kotlin.reflect.KClass
+import kotlin.reflect.full.safeCast
 
 fun <S, T> TableColumnBase<S, T>.hasClass(className: String) = styleClass.contains(className)
 fun <S, T> TableColumnBase<S, T>.hasClass(className: CssRule) = hasClass(className.name)
@@ -72,51 +71,43 @@ fun <S, T> TableColumnBase<S, T>.toggleClass(className: String, predicate: Boole
 fun Node.hasClass(className: String) = styleClass.contains(className)
 fun Node.hasPseudoClass(className: String) = pseudoClassStates.contains(PseudoClass.getPseudoClass(className))
 
-fun <T : Node> T.addClass(vararg className: String): T {
-    styleClass.addAll(className)
-    return this
-}
+fun <T : Node> T.addClass(vararg className: String) = apply { styleClass.addAll(className) }
+fun Iterable<Node>.addClass(vararg cssClass: String) = forEach { node -> cssClass.forEach { node.addClass(it) } }
 
-fun <T : Node> T.addPseudoClass(className: String): T {
+fun <T : Node> T.addPseudoClass(className: String) = apply {
     val pseudoClass = PseudoClass.getPseudoClass(className)
     pseudoClassStateChanged(pseudoClass, true)
-    return this
 }
 
-fun <T : Node> T.removePseudoClass(className: String): T {
+fun <T : Node> T.removePseudoClass(className: String) = apply {
     val pseudoClass = PseudoClass.getPseudoClass(className)
     pseudoClassStateChanged(pseudoClass, false)
-    return this
 }
 
-fun <T : Node> T.removeClass(className: String): T {
-    styleClass.remove(className); return this
-}
+fun <T : Node> T.removeClass(className: String) = apply { styleClass.remove(className) }
 
-fun <T : Node> T.toggleClass(className: String, predicate: Boolean): T {
+fun <T : Node> T.toggleClass(className: String, predicate: Boolean) = apply {
     if (predicate) {
         if (!hasClass(className)) addClass(className)
     } else {
         removeClass(className)
     }
-    return this
 }
 
-fun <T : Node> T.togglePseudoClass(className: String, predicate: Boolean): T {
+fun <T : Node> T.togglePseudoClass(className: String, predicate: Boolean) = apply {
     if (predicate) {
         if (!hasPseudoClass(className)) addPseudoClass(className)
     } else {
         removePseudoClass(className)
     }
-    return this
 }
 
 fun Node.getToggleGroup(): ToggleGroup? = properties["tornadofx.togglegroup"] as ToggleGroup?
 
-fun Node.tooltip(text: String? = null, graphic: Node? = null, op: (Tooltip.() -> Unit)? = null): Tooltip {
+fun Node.tooltip(text: String? = null, graphic: Node? = null, op: Tooltip.() -> Unit = {}): Tooltip {
     val newToolTip = Tooltip(text)
     graphic?.apply { newToolTip.graphic = this }
-    if (op != null) newToolTip.op()
+    newToolTip.op()
     if (this is Control) tooltip = newToolTip else Tooltip.install(this, newToolTip)
     return newToolTip
 }
@@ -204,7 +195,7 @@ fun Stage.hookGlobalShortcuts() {
         if (FX.layoutDebuggerShortcut?.match(it) ?: false)
             LayoutDebugger.debug(scene)
         else if (FX.osgiDebuggerShortcut?.match(it) ?: false && FX.osgiAvailable)
-            find(OSGIConsole::class).openModal(modality = Modality.NONE)
+            find<OSGIConsole>().openModal(modality = Modality.NONE)
     }
 }
 
@@ -229,7 +220,7 @@ fun Pane.replaceChildren(vararg uiComponents: UIComponent) =
         this.replaceChildren(*(uiComponents.map { it.root }.toTypedArray()))
 
 fun EventTarget.replaceChildren(vararg node: Node) {
-    val children = getChildList() ?: throw IllegalArgumentException("This node doesn't have a child list")
+    val children = requireNotNull(getChildList()){"This node doesn't have a child list"}
     children.clear()
     children.addAll(node)
 }
@@ -278,24 +269,27 @@ var Region.useMaxSize: Boolean
 
 var Region.usePrefWidth: Boolean
     get() = width == prefWidth
-    set(value) = if (value) setMinWidth(Button.USE_PREF_SIZE) else Unit
+    set(value) = if (value) setMinWidth(Region.USE_PREF_SIZE) else Unit
 
 var Region.usePrefHeight: Boolean
     get() = height == prefHeight
-    set(value) = if (value) setMinHeight(Button.USE_PREF_SIZE) else Unit
+    set(value) = if (value) setMinHeight(Region.USE_PREF_SIZE) else Unit
 
 var Region.usePrefSize: Boolean
     get() = maxWidth == Double.MAX_VALUE && maxHeight == Double.MAX_VALUE
-    set(value) = if (value) setMinSize(Button.USE_PREF_SIZE, Button.USE_PREF_SIZE) else Unit
+    set(value) = if (value) setMinSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE) else Unit
 
+fun point(x: Number, y: Number) = Point2D(x.toDouble(), y.toDouble())
+fun point(x: Number, y: Number, z: Number) = Point3D(x.toDouble(), y.toDouble(), z.toDouble())
+infix fun Number.xy(y: Number) = Point2D(toDouble(), y.toDouble())
 
-fun TableView<out Any>.resizeColumnsToFitContent(resizeColumns: List<TableColumn<*, *>> = contentColumns, maxRows: Int = 50, afterResize: (() -> Unit)? = null) {
+fun TableView<out Any>.resizeColumnsToFitContent(resizeColumns: List<TableColumn<*, *>> = contentColumns, maxRows: Int = 50, afterResize: () -> Unit = {}) {
     val doResize = {
         try {
             val resizer = skin.javaClass.getDeclaredMethod("resizeColumnToFitContent", TableColumn::class.java, Int::class.java)
             resizer.isAccessible = true
             resizeColumns.forEach { resizer.invoke(skin, it, maxRows) }
-            afterResize?.invoke()
+            afterResize()
         } catch (ex: Exception) {
             // Silent for now, it is usually run multiple times
             //log.warning("Unable to resize columns to content: ${columns.map { it.text }.joinToString(", ")}")
@@ -304,14 +298,20 @@ fun TableView<out Any>.resizeColumnsToFitContent(resizeColumns: List<TableColumn
     if (skin == null) Platform.runLater { doResize() } else doResize()
 }
 
-fun <T> TreeTableView<T>.resizeColumnsToFitContent(resizeColumns: List<TreeTableColumn<*, *>> = contentColumns, maxRows: Int = 50, afterResize: (() -> Unit)? = null) {
+fun <T> TreeTableView<T>.resizeColumnsToFitContent(resizeColumns: List<TreeTableColumn<*, *>> = contentColumns, maxRows: Int = 50, afterResize: () -> Unit = {}) {
     val doResize = {
         val resizer = skin.javaClass.getDeclaredMethod("resizeColumnToFitContent", TreeTableColumn::class.java, Int::class.java)
         resizer.isAccessible = true
         resizeColumns.forEach { resizer.invoke(skin, it, maxRows) }
         afterResize?.invoke()
     }
-    if (skin == null) Platform.runLater { doResize() } else doResize()
+    if (skin == null) {
+        skinProperty().onChangeOnce {
+            Platform.runLater { doResize() }
+        }
+    } else {
+        doResize()
+    }
 }
 
 fun <T> TableView<T>.selectWhere(scrollTo: Boolean = true, condition: (T) -> Boolean) {
@@ -357,12 +357,7 @@ val <T> TableView<T>.selectedItem: T?
 val <T> TreeTableView<T>.selectedItem: T?
     get() = this.selectionModel.selectedItem?.value
 
-val <T> TreeView<T>.selectedValue: T?
-    get() = this.selectionModel.selectedItem?.value
-
 fun <T> TableView<T>.selectFirst() = selectionModel.selectFirst()
-
-fun <T> TreeView<T>.selectFirst() = selectionModel.selectFirst()
 
 fun <T> TreeTableView<T>.selectFirst() = selectionModel.selectFirst()
 
@@ -372,59 +367,18 @@ val <T> ComboBox<T>.selectedItem: T?
 fun <S> TableView<S>.onSelectionChange(func: (S?) -> Unit) =
         selectionModel.selectedItemProperty().addListener({ observable, oldValue, newValue -> func(newValue) })
 
-fun <T> TreeView<T>.bindSelected(property: Property<T>) {
+
+fun <T> TreeTableView<T>.bindSelected(property: Property<T>) {
     selectionModel.selectedItemProperty().onChange {
         property.value = it?.value
     }
 }
 
-fun <T> TreeView<T>.bindSelected(model: ItemViewModel<T>) = this.bindSelected(model.itemProperty)
+fun <T> TreeTableView<T>.bindSelected(model: ItemViewModel<T>) = this.bindSelected(model.itemProperty)
 
 class TableColumnCellCache<T>(private val cacheProvider: (T) -> Node) {
     private val store = mutableMapOf<T, Node>()
     fun getOrCreateNode(value: T) = store.getOrPut(value, { cacheProvider(value) })
-}
-
-/**
- * Calculate a unique Node per item and set this Node as the graphic of the TableCell.
- *
- * To support this feature, a custom cellFactory is automatically installed, unless an already
- * compatible cellFactory is found. The cellFactories installed via #cellFormat already knows
- * how to retrieve cached values.
- */
-fun <S, T> TableColumn<S, T>.cellCache(cachedGraphicProvider: (T) -> Node) {
-    properties["tornadofx.cellCache"] = TableColumnCellCache(cachedGraphicProvider)
-    // Install a cache capable cellFactory it none is present. The default cellFormat factory will do.
-    if (properties["tornadofx.cellCacheCapable"] != true) {
-        cellFormat { }
-    }
-}
-
-@Suppress("UNCHECKED_CAST")
-fun <S, T> TableColumn<S, T>.cellFormat(formatter: TableCell<S, T>.(T) -> Unit) {
-    properties["tornadofx.cellCacheCapable"] = true
-    cellFactory = Callback { _: TableColumn<S, T> ->
-        object : TableCell<S, T>() {
-            override fun updateItem(item: T, empty: Boolean) {
-                super.updateItem(item, empty)
-
-                if (item == null || empty) {
-                    textProperty().unbind()
-                    graphicProperty().unbind()
-                    text = null
-                    graphic = null
-                } else {
-                    // Consult the cell cache before calling the formatter function
-                    val cellCache = this@cellFormat.properties["tornadofx.cellCache"]
-                    if (cellCache is TableColumnCellCache<*>) {
-                        graphicProperty().unbind()
-                        graphic = (cellCache as TableColumnCellCache<T>).getOrCreateNode(item)
-                    }
-                    formatter(this, item)
-                }
-            }
-        }
-    }
 }
 
 fun <S, T> TableColumn<S, T>.cellDecorator(decorator: TableCell<S, T>.(T) -> Unit) {
@@ -436,35 +390,6 @@ fun <S, T> TableColumn<S, T>.cellDecorator(decorator: TableCell<S, T>.(T) -> Uni
             if (newValue != null) decorator(cell, newValue)
         }
         cell
-    }
-}
-
-fun <S> TreeView<S>.cellFormat(formatter: (TreeCell<S>.(S) -> Unit)) {
-    cellFactory = Callback {
-        object : TreeCell<S>() {
-            override fun updateItem(item: S?, empty: Boolean) {
-                super.updateItem(item, empty)
-
-                if (item == null || empty) {
-                    text = null
-                    graphic = null
-                } else {
-                    formatter(this, item)
-                }
-            }
-        }
-    }
-}
-
-fun <S> TreeView<S>.cellDecorator(decorator: (TreeCell<S>.(S) -> Unit)) {
-    val originalFactory = cellFactory
-
-    if (originalFactory == null) cellFormat(decorator) else {
-        cellFactory = Callback { treeView: TreeView<S> ->
-            val cell = originalFactory.call(treeView)
-            cell.itemProperty().onChange { decorator(cell, cell.item) }
-            cell
-        }
     }
 }
 
@@ -546,7 +471,7 @@ val <S, T> TableCell<S, T>.rowItem: S get() = tableView.items[index]
 val <S, T> TreeTableCell<S, T>.rowItem: S get() = treeTableView.getTreeItem(index).value
 
 fun <T> ListProperty<T>.asyncItems(func: () -> Collection<T>) =
-        task { func() } success { value = if (it is ObservableList<*>) it as ObservableList<T> else observableArrayList(it) }
+        task { func() } success { value = (it as? ObservableList<T>) ?: observableArrayList(it) }
 
 fun <T> ObservableList<T>.asyncItems(func: () -> Collection<T>) =
         task { func() } success { setAll(it) }
@@ -560,24 +485,10 @@ fun <T> TableView<T>.asyncItems(func: FXTask<*>.() -> Collection<T>) =
 fun <T> ComboBox<T>.asyncItems(func: FXTask<*>.() -> Collection<T>) =
         task(func = func).success { if (items == null) items = observableArrayList(it) else items.setAll(it) }
 
-fun <T> TreeView<T>.onUserSelect(action: (T) -> Unit) {
-    selectionModel.selectedItemProperty().addListener { obs, old, new ->
-        if (new != null && new.value != null)
-            action(new.value)
-    }
-}
-
 fun <T> TableView<T>.onUserDelete(action: (T) -> Unit) {
     addEventFilter(KeyEvent.KEY_PRESSED, { event ->
         if (event.code == KeyCode.BACK_SPACE && selectedItem != null)
             action(selectedItem!!)
-    })
-}
-
-fun <T> TreeView<T>.onUserDelete(action: (T) -> Unit) {
-    addEventFilter(KeyEvent.KEY_PRESSED, { event ->
-        if (event.code == KeyCode.BACK_SPACE && selectionModel.selectedItem?.value != null)
-            action(selectedValue!!)
     })
 }
 
@@ -603,7 +514,7 @@ fun EventTarget.isInsideRow(): Boolean {
 /**
  * Access BorderPane constraints to manipulate and apply on this control
  */
-fun <T : Node> T.borderpaneConstraints(op: (BorderPaneConstraint.() -> Unit)): T {
+inline fun <T : Node> T.borderpaneConstraints(op: (BorderPaneConstraint.() -> Unit)): T {
     val bpc = BorderPaneConstraint(this)
     bpc.op()
     return bpc.applyToNode(this)
@@ -623,7 +534,7 @@ class BorderPaneConstraint(node: Node,
 /**
  * Access GridPane constraints to manipulate and apply on this control
  */
-fun <T : Node> T.gridpaneConstraints(op: (GridPaneConstraint.() -> Unit)): T {
+inline fun <T : Node> T.gridpaneConstraints(op: (GridPaneConstraint.() -> Unit)): T {
     val gpc = GridPaneConstraint(this)
     gpc.op()
     return gpc.applyToNode(this)
@@ -683,13 +594,13 @@ class GridPaneConstraint(node: Node,
     }
 }
 
-fun <T : Node> T.vboxConstraints(op: (VBoxConstraint.() -> Unit)): T {
+inline fun <T : Node> T.vboxConstraints(op: (VBoxConstraint.() -> Unit)): T {
     val c = VBoxConstraint(this)
     c.op()
     return c.applyToNode(this)
 }
 
-fun <T : Node> T.stackpaneConstraints(op: (StackpaneConstraint.() -> Unit)): T {
+inline fun <T : Node> T.stackpaneConstraints(op: (StackpaneConstraint.() -> Unit)): T {
     val c = StackpaneConstraint(this)
     c.op()
     return c.applyToNode(this)
@@ -719,7 +630,7 @@ class StackpaneConstraint(node: Node,
     }
 }
 
-fun <T : Node> T.hboxConstraints(op: (HBoxConstraint.() -> Unit)): T {
+inline fun <T : Node> T.hboxConstraints(op: (HBoxConstraint.() -> Unit)): T {
     val c = HBoxConstraint(this)
     c.op()
     return c.applyToNode(this)
@@ -750,23 +661,23 @@ var Node.vgrow: Priority? get() = VBox.getVgrow(this); set(value) {
     }
 }
 
-fun <T : Node> T.anchorpaneConstraints(op: AnchorPaneConstraint.() -> Unit): T {
+inline fun <T : Node> T.anchorpaneConstraints(op: AnchorPaneConstraint.() -> Unit): T {
     val c = AnchorPaneConstraint()
     c.op()
     return c.applyToNode(this)
 }
 
 class AnchorPaneConstraint(
-        var topAnchor: Double? = null,
-        var rightAnchor: Double? = null,
-        var bottomAnchor: Double? = null,
-        var leftAnchor: Double? = null
+        var topAnchor: Number? = null,
+        var rightAnchor: Number? = null,
+        var bottomAnchor: Number? = null,
+        var leftAnchor: Number? = null
 ) {
     fun <T : Node> applyToNode(node: T): T {
-        topAnchor?.let { AnchorPane.setTopAnchor(node, it) }
-        rightAnchor?.let { AnchorPane.setRightAnchor(node, it) }
-        bottomAnchor?.let { AnchorPane.setBottomAnchor(node, it) }
-        leftAnchor?.let { AnchorPane.setLeftAnchor(node, it) }
+        topAnchor?.let { AnchorPane.setTopAnchor(node, it.toDouble()) }
+        rightAnchor?.let { AnchorPane.setRightAnchor(node, it.toDouble()) }
+        bottomAnchor?.let { AnchorPane.setBottomAnchor(node, it.toDouble()) }
+        leftAnchor?.let { AnchorPane.setLeftAnchor(node, it.toDouble()) }
         return node
     }
 }
@@ -809,7 +720,7 @@ abstract class MarginableConstraints {
 }
 
 @Suppress("CAST_NEVER_SUCCEEDS", "UNCHECKED_CAST")
-inline fun <T, reified S : Any> TableColumn<T, S>.makeEditable(): TableColumn<T, S> {
+inline fun <T, reified S : Any> TableColumn<T, S>.makeEditable() = apply {
     tableView?.isEditable = true
     isEditable = true
     when (S::class.javaPrimitiveType ?: S::class) {
@@ -822,6 +733,7 @@ inline fun <T, reified S : Any> TableColumn<T, S>.makeEditable(): TableColumn<T,
         Float::class.javaPrimitiveType -> cellFactory = TextFieldTableCell.forTableColumn<T, S>(FloatStringConverter() as StringConverter<S>)
         Long::class -> cellFactory = TextFieldTableCell.forTableColumn<T, S>(LongStringConverter() as StringConverter<S>)
         Long::class.javaPrimitiveType -> cellFactory = TextFieldTableCell.forTableColumn<T, S>(LongStringConverter() as StringConverter<S>)
+        Number::class -> cellFactory = TextFieldTableCell.forTableColumn<T, S>(NumberStringConverter() as StringConverter<S>)
         BigDecimal::class -> cellFactory = TextFieldTableCell.forTableColumn<T, S>(BigDecimalStringConverter() as StringConverter<S>)
         BigInteger::class -> cellFactory = TextFieldTableCell.forTableColumn<T, S>(BigIntegerStringConverter() as StringConverter<S>)
         String::class -> cellFactory = TextFieldTableCell.forTableColumn<T, S>(DefaultStringConverter() as StringConverter<S>)
@@ -834,7 +746,6 @@ inline fun <T, reified S : Any> TableColumn<T, S>.makeEditable(): TableColumn<T,
         }
         else -> throw RuntimeException("makeEditable() is not implemented for specified class type:" + S::class.qualifiedName)
     }
-    return this
 }
 
 fun <T> TableView<T>.regainFocusAfterEdit() = apply {
@@ -849,14 +760,7 @@ fun <T, S : Any> TableColumn<T, S>.makeEditable(converter: StringConverter<S>): 
     cellFactory = TextFieldTableCell.forTableColumn<T, S>(converter)
 }
 
-fun <T, S : Any> TableColumn<T, S?>.converter(converter: StringConverter<S>): TableColumn<T, S?> = apply {
-    cellFormat { text = converter.toString(it) }
-}
-
 fun <T> TreeTableView<T>.populate(itemFactory: (T) -> TreeItem<T> = { TreeItem(it) }, childFactory: (TreeItem<T>) -> Iterable<T>?) =
-        populateTree(root, itemFactory, childFactory)
-
-fun <T> TreeView<T>.populate(itemFactory: (T) -> TreeItem<T> = { TreeItem(it) }, childFactory: (TreeItem<T>) -> Iterable<T>?) =
         populateTree(root, itemFactory, childFactory)
 
 /**
@@ -904,12 +808,18 @@ fun <T> populateTree(item: TreeItem<T>, itemFactory: (T) -> TreeItem<T>, childFa
 inline fun <reified T : UIComponent> Node.uiComponent(): T? = properties[UI_COMPONENT_PROPERTY] as? T
 
 /**
+ * Return the UIComponent (View or Fragment) that represents the root of the current Scene within this Stage
+ */
+inline fun <reified T : UIComponent> Stage.uiComponent(): T? = scene.root.uiComponent()
+
+/**
  * Find all UIComponents of the specified type that owns any of this node's children
  */
 inline fun <reified T : UIComponent> Parent.findAll(): List<T> = childrenUnmodifiable
         .filterIsInstance<Parent>()
-        .filter { it.uiComponent<UIComponent>() is T }
-        .map { it.uiComponent<T>()!! }
+        .map { it.uiComponent<UIComponent>() }
+        .filterIsInstance<T>()
+
 
 /**
  * Find all UIComponents of the specified type that owns any of this UIComponent's root node's children
@@ -919,20 +829,12 @@ inline fun <reified T : UIComponent> UIComponent.findAll(): List<T> = root.findA
 /**
  * Find the first UIComponent of the specified type that owns any of this node's children
  */
-inline fun <reified T : UIComponent> Parent.lookup(noinline op: (T.() -> Unit)? = null): T? {
-    val result = findAll<T>().getOrNull(0)
-    if (result != null) op?.invoke(result)
-    return result
-}
+inline fun <reified T : UIComponent> Parent.lookup(noinline op: T.() -> Unit = {}): T? = findAll<T>().getOrNull(0)?.also(op)
 
 /**
  * Find the first UIComponent of the specified type that owns any of this UIComponent's root node's children
  */
-inline fun <reified T : UIComponent> UIComponent.lookup(noinline op: (T.() -> Unit)? = null): T? {
-    val result = findAll<T>().getOrNull(0)
-    if (result != null) op?.invoke(result)
-    return result
-}
+inline fun <reified T : UIComponent> UIComponent.lookup(noinline op: T.() -> Unit = {}): T? = findAll<T>().getOrNull(0)?.also(op)
 
 fun EventTarget.removeFromParent() {
     if (this is UIComponent) {
@@ -942,11 +844,8 @@ fun EventTarget.removeFromParent() {
     } else if (this is Tab) {
         tabPane?.tabs?.remove(this)
     } else if (this is Node) {
-        if (parent?.parent is ToolBar) {
-            (parent.parent as ToolBar).items.remove(this)
-        } else {
-            parent?.getChildList()?.remove(this)
-        }
+        (parent?.parent as? ToolBar)?.items?.remove(this)
+                ?: parent?.getChildList()?.remove(this)
     }
 }
 
@@ -987,13 +886,14 @@ internal var Node.isTransitioning: Boolean
  * @param transition The [ViewTransition] used to animate the transition
  * @return Whether or not the transition will run
  */
-fun Node.replaceWith(replacement: Node, transition: ViewTransition? = null, sizeToScene: Boolean = false, centerOnScreen: Boolean = false, onTransit: (() -> Unit)? = null): Boolean {
+fun Node.replaceWith(replacement: Node, transition: ViewTransition? = null, sizeToScene: Boolean = false, centerOnScreen: Boolean = false, onTransit: () -> Unit = {}): Boolean {
     if (isTransitioning || replacement.isTransitioning) {
         return false
     }
-    onTransit?.invoke()
+    onTransit()
     if (this == scene?.root) {
         val scene = scene!!
+
         if (replacement !is Parent) {
             throw IllegalArgumentException("Replacement scene root must be a Parent")
         }
@@ -1058,7 +958,7 @@ fun Node.replaceWith(replacement: Node, transition: ViewTransition? = null, size
 }
 
 @Deprecated("This will go away in the future. Use the version with centerOnScreen parameter", ReplaceWith("replaceWith(replacement, transition, sizeToScene, false)"))
-fun Node.replaceWith(replacement: Node, transition: ViewTransition? = null, sizeToScene: Boolean, onTransit: (() -> Unit)? = null) =
+fun Node.replaceWith(replacement: Node, transition: ViewTransition? = null, sizeToScene: Boolean, onTransit: () -> Unit = {}) =
         replaceWith(replacement, transition, sizeToScene, false)
 
 fun Node.hide() {
@@ -1079,12 +979,14 @@ fun Node.whenVisible(runLater: Boolean = true, op: () -> Unit) {
     }
 }
 
+inline fun <reified T:Any> Node.findParent(): T? = findParentOfType(T::class)
+
 @Suppress("UNCHECKED_CAST")
 fun <T : Any> Node.findParentOfType(parentType: KClass<T>): T? {
     if (parent == null) return null
-    if (parentType.java.isAssignableFrom(parent.javaClass)) return parent as T
+    parentType.safeCast(parent)?.also { return it }
     val uicmp = parent.uiComponent<UIComponent>()
-    if (uicmp != null && parentType.java.isAssignableFrom(uicmp.javaClass)) return uicmp as T
+    parentType.safeCast(uicmp)?.also { return it }
     return parent?.findParentOfType(parentType)
 }
 
@@ -1139,31 +1041,127 @@ val Region.paddingHorizontalProperty: DoubleProperty get() {
 }
 
 val Region.paddingAllProperty: DoubleProperty get() {
-    return properties.getOrPut("paddingVerticalProperty") {
+    return properties.getOrPut("paddingAllProperty") {
         proxypropDouble(paddingProperty(), { paddingAll.toDouble() }) {
             Insets(it, it, it, it)
         }
     } as DoubleProperty
 }
 
-fun Node.managedWhen(expr: () -> ObservableValue<Boolean>) = managedWhen(expr())
-fun Node.managedWhen(predicate: ObservableValue<Boolean>) = managedProperty().cleanBind(predicate)
-fun Node.visibleWhen(predicate: ObservableValue<Boolean>) = visibleProperty().cleanBind(predicate)
-fun Node.visibleWhen(expr: () -> ObservableValue<Boolean>) = visibleWhen(expr())
-fun Node.hiddenWhen(expr: () -> ObservableValue<Boolean>) = hiddenWhen(expr())
-fun Node.hiddenWhen(predicate: ObservableValue<Boolean>) {
+// -- Node helpers
+/**
+ * This extension function will automatically bind to the managedProperty of the given node
+ * and will make sure that it is managed, if the given [expr] returning an observable boolean value equals true.
+ *
+ * @see https://docs.oracle.com/javase/8/javafx/api/javafx/scene/Node.html#managedProperty
+ */
+fun <T: Node> T.managedWhen(expr: () -> ObservableValue<Boolean>): T = managedWhen(expr())
+
+/**
+ * This extension function will automatically bind to the managedProperty of the given node
+ * and will make sure that it is managed, if the given [predicate] an observable boolean value equals true.
+ *
+ * @see https://docs.oracle.com/javase/8/javafx/api/javafx/scene/Node.html#managedProperty)
+ */
+fun <T: Node> T.managedWhen(predicate: ObservableValue<Boolean>) = apply {
+    managedProperty().cleanBind(predicate)
+}
+
+/**
+ * This extension function will automatically bind to the visibleProperty of the given node
+ * and will make sure that it is visible, if the given [predicate] an observable boolean value equals true.
+ *
+ * @see https://docs.oracle.com/javase/8/javafx/api/javafx/scene/Node.html#visibleProperty
+ */
+fun <T: Node> T.visibleWhen(predicate: ObservableValue<Boolean>) = apply {
+  visibleProperty().cleanBind(predicate)
+}
+
+/**
+ * This extension function will automatically bind to the visibleProperty of the given node
+ * and will make sure that it is visible, if the given [expr] returning an observable boolean value equals true.
+ *
+ * @see https://docs.oracle.com/javase/8/javafx/api/javafx/scene/Node.html#visibleProperty
+ */
+fun <T: Node> T.visibleWhen(expr: () -> ObservableValue<Boolean>): T = visibleWhen(expr())
+
+/**
+ * This extension function will make sure to hide the given node,
+ * if the given [expr] returning an observable boolean value equals true.
+ */
+fun <T: Node> T.hiddenWhen(expr: () -> ObservableValue<Boolean>): T = hiddenWhen(expr())
+
+/**
+ * This extension function will make sure to hide the given node,
+ * if the given [predicate] an observable boolean value equals true.
+ */
+fun <T: Node> T.hiddenWhen(predicate: ObservableValue<Boolean>) = apply {
     val binding = if (predicate is BooleanBinding) predicate.not() else predicate.toBinding().not()
     visibleProperty().cleanBind(binding)
 }
 
-fun Node.disableWhen(expr: () -> ObservableValue<Boolean>) = disableWhen(expr())
-fun Node.disableWhen(obs: ObservableValue<Boolean>) = disableProperty().cleanBind(obs)
-fun Node.enableWhen(expr: () -> ObservableValue<Boolean>) = enableWhen(expr())
-fun Node.enableWhen(predicate: ObservableValue<Boolean>) {
+/**
+ * This extension function will automatically bind to the disableProperty of the given node
+ * and will disable it, if the given [expr] returning an observable boolean value equals true.
+ *
+ * @see https://docs.oracle.com/javase/8/javafx/api/javafx/scene/Node.html#disable
+ */
+fun <T: Node> T.disableWhen(expr: () -> ObservableValue<Boolean>): T = disableWhen(expr())
+
+/**
+ * This extension function will automatically bind to the disableProperty of the given node
+ * and will disable it, if the given [predicate] observable boolean value equals true.
+ *
+ * @see https://docs.oracle.com/javase/8/javafx/api/javafx/scene/Node.html#disableProperty
+ */
+fun <T: Node> T.disableWhen(predicate: ObservableValue<Boolean>) = apply {
+    disableProperty().cleanBind(predicate)
+}
+
+/**
+ * This extension function will make sure that the given node is enabled when ever,
+ * the given [expr] returning an observable boolean value equals true.
+ */
+fun <T: Node> T.enableWhen(expr: () -> ObservableValue<Boolean>): T = enableWhen(expr())
+
+/**
+ * This extension function will make sure that the given node is enabled when ever,
+ * the given [predicate] observable boolean value equals true.
+ */
+fun <T: Node> T.enableWhen(predicate: ObservableValue<Boolean>) = apply {
     val binding = if (predicate is BooleanBinding) predicate.not() else predicate.toBinding().not()
     disableProperty().cleanBind(binding)
 }
 
+/**
+ * This extension function will make sure that the given node will only be visible in the scene graph,
+ * if the given [expr] returning an observable boolean value equals true.
+ */
+fun <T: Node> T.removeWhen(expr: () -> ObservableValue<Boolean>): T = removeWhen(expr())
+
+/**
+ * This extension function will make sure that the given node will only be visible in the scene graph,
+ * if the given [predicate] observable boolean value equals true.
+ */
+fun <T: Node> T.removeWhen(predicate: ObservableValue<Boolean>) = apply {
+    val remove = booleanBinding(predicate) { predicate.value.not() }
+    visibleProperty().cleanBind(remove)
+    managedProperty().cleanBind(remove)
+}
+
+fun TextInputControl.editableWhen(predicate: ObservableValue<Boolean>) = apply {
+    editableProperty().bind(predicate)
+}
+
+/**
+ * This extension function will make sure that the given [onHover] function will always be calles
+ * when ever the hoverProperty of the given node changes.
+ */
+fun <T: Node> T.onHover(onHover: (Boolean) -> Unit) = apply {
+    hoverProperty().onChange { onHover(isHover) }
+}
+
+// -- MenuItem helpers
 fun MenuItem.visibleWhen(expr: () -> ObservableValue<Boolean>) = visibleWhen(expr())
 fun MenuItem.visibleWhen(predicate: ObservableValue<Boolean>) = visibleProperty().cleanBind(predicate)
 fun MenuItem.disableWhen(expr: () -> ObservableValue<Boolean>) = disableWhen(expr())
@@ -1174,16 +1172,7 @@ fun MenuItem.enableWhen(obs: ObservableValue<Boolean>) {
     disableProperty().cleanBind(binding)
 }
 
-fun Node.removeWhen(expr: () -> ObservableValue<Boolean>) = removeWhen(expr())
-fun Node.removeWhen(predicate: ObservableValue<Boolean>) {
-    val remove = booleanBinding(predicate) { predicate.value.not() }
-    visibleProperty().cleanBind(remove)
-    managedProperty().cleanBind(remove)
-}
-
-fun Node.onHover(onHover: (Boolean) -> Unit) = hoverProperty().onChange { onHover(isHover) }
-
-fun EventTarget.svgicon(shape: String, size: Number = 16, color: Paint = Color.BLACK, op: (SVGIcon.() -> Unit)? = null) = opcr(this, SVGIcon(shape, size, color), op)
+fun EventTarget.svgicon(shape: String, size: Number = 16, color: Paint = Color.BLACK, op: SVGIcon.() -> Unit = {}) = opcr(this, SVGIcon(shape, size, color), op)
 
 class SVGIcon(svgShape: String, size: Number = 16, color: Paint = Color.BLACK) : Pane() {
     init {
@@ -1230,14 +1219,14 @@ internal val Node.shortLongPressHandler: ShortLongPressHandler get() = propertie
     ShortLongPressHandler(this)
 } as ShortLongPressHandler
 
-fun Node.shortpress(consume: Boolean = false, action: (InputEvent) -> Unit) {
+fun <T: Node> T.shortpress(consume: Boolean = false, action: (InputEvent) -> Unit) = apply {
     shortLongPressHandler.apply {
         this.consume = consume
         this.shortAction = action
     }
 }
 
-fun Node.longpress(threshold: Duration = 700.millis, consume: Boolean = false, action: (MouseEvent) -> Unit) {
+fun <T: Node> T.longpress(threshold: Duration = 700.millis, consume: Boolean = false, action: (MouseEvent) -> Unit) = apply {
     shortLongPressHandler.apply {
         this.consume = consume
         this.holdTimer.duration = threshold
@@ -1274,3 +1263,28 @@ fun Node.longpress(threshold: Duration = 700.millis, consume: Boolean = false, a
 fun <T : Node> Node.cache(key: Any = "tornadofx.cachedNode", op: EventTarget.() -> T) = properties.getOrPut(key) {
     op(this)
 } as T
+
+
+/**
+ * Filter the input of the text field by passing each change to the discriminator
+ * function and only applying the change if the discriminator returns true
+ *
+ * To only allow digits for example, do:
+ *
+ * filterInput { it.controlNewText.isInt() }
+ *
+ * You can also access just the changed text in `it.text` to validate just the new input.
+ *
+ */
+fun TextInputControl.filterInput(discriminator: (TextFormatter.Change) -> Boolean) {
+    textFormatter = TextFormatter<Any>(CustomTextFilter(discriminator))
+}
+
+/**
+ * Custom text filter used to supress input values, for example to
+ * only allow numbers in a textfield. Used via the filterInput {} builder
+ */
+class CustomTextFilter(private val discriminator: (TextFormatter.Change) -> Boolean) : UnaryOperator<TextFormatter.Change> {
+    override fun apply(c: TextFormatter.Change): TextFormatter.Change =
+            if (discriminator(c)) c else c.clone().apply { text = "" }
+}

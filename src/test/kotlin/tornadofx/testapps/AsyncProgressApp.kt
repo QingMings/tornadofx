@@ -27,7 +27,7 @@ class AsyncProgressView : View("Async Progress") {
             }
         }
         bottom {
-            add(ProgressView::class)
+            add<ProgressView>()
         }
     }
 }
@@ -43,6 +43,19 @@ class ProgressView : View() {
             label(status.message)
             progressbar(status.progress)
             visibleWhen { status.running }
+        }
+    }
+}
+
+class AsyncProgressButtonView : View() {
+    override val root = stackpane {
+        setPrefSize(400.0, 400.0)
+        button("Click me") {
+            action {
+                runAsyncWithProgress {
+                    Thread.sleep(2000)
+                }
+            }
         }
     }
 }

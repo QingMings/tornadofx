@@ -18,6 +18,7 @@ import javafx.scene.image.ImageView
 import javafx.scene.input.MouseEvent
 import javafx.scene.layout.Region
 import javafx.scene.text.Text
+import tornadofx.WizardStyles.Companion.graphic
 
 @DefaultProperty("children")
 class ListMenu : Control() {
@@ -56,9 +57,7 @@ class ListMenu : Control() {
     val iconPositionProperty: ObjectProperty<Side> = object : SimpleObjectProperty<Side>(Side.LEFT) {
         override fun invalidated() {
             children.forEach { child ->
-                if (child is ListMenuItem) {
-                    child.needsLayout()
-                }
+                (child as? ListMenuItem)?.needsLayout()
             }
         }
     }
@@ -81,7 +80,7 @@ class ListMenu : Control() {
 
     override fun getUserAgentStylesheet(): String = ListMenu::class.java.getResource("listmenu.css").toExternalForm()
 
-    fun item(text: String? = null, graphic: Node? = null, tag: Any? = null, op :(ListMenuItem.() -> Unit)? = null): ListMenuItem {
+    fun item(text: String? = null, graphic: Node? = null, tag: Any? = null, op :ListMenuItem.() -> Unit = {}): ListMenuItem {
         val item = ListMenuItem(text ?: tag?.toString(), graphic)
         item.tag = tag
         return opcr(this, item, op)
@@ -318,7 +317,7 @@ class ListMenuItemSkin(control: ListMenuItem) : SkinBase<ListMenuItem>(control) 
     private val graphicFixedSize: Double get() = skinnable.menu.graphicFixedSizeProperty.value.toDouble()
 }
 
-fun EventTarget.listmenu(orientation: Orientation = VERTICAL, iconPosition: Side = Side.LEFT, theme: String? = null, tag: Any? = null, op: (ListMenu.() -> Unit)? = null): ListMenu {
+fun EventTarget.listmenu(orientation: Orientation = VERTICAL, iconPosition: Side = Side.LEFT, theme: String? = null, tag: Any? = null, op: ListMenu.() -> Unit = {}): ListMenu {
     val listmenu = ListMenu().apply {
         this.orientation = orientation
         this.iconPosition = iconPosition

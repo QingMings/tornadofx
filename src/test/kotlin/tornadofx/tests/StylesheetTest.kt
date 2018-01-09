@@ -1,7 +1,10 @@
 package tornadofx.tests
 
 import javafx.css.PseudoClass
-import javafx.scene.control.Label
+import javafx.css.Styleable
+import javafx.scene.control.*
+import javafx.scene.effect.BlurType
+import javafx.scene.effect.InnerShadow
 import javafx.scene.layout.Pane
 import javafx.scene.paint.*
 import javafx.scene.text.Font
@@ -12,7 +15,9 @@ import org.junit.Test
 import org.testfx.api.FxToolkit
 import tornadofx.*
 import tornadofx.Stylesheet.Companion.armed
+import tornadofx.Stylesheet.Companion.barChart
 import tornadofx.Stylesheet.Companion.hover
+import tornadofx.Stylesheet.Companion.imageView
 import tornadofx.Stylesheet.Companion.label
 import tornadofx.Stylesheet.Companion.star
 import java.net.URI
@@ -21,7 +26,7 @@ import kotlin.test.assertFails
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class StylesheetTests {
+class StylesheetTest {
     val vbox by cssclass()
     val wrapper by cssclass()
 
@@ -501,15 +506,47 @@ class StylesheetTests {
 
     @Test
     fun inlineStyle() {
-        val node = Pane()
-        node.style {
-            backgroundColor += Color.RED
+        val arrayOfStyleables = arrayOf<Styleable>(Pane(), MenuItem("Click Me"), Tooltip("Click"), Tab("This Tab"), TableColumn<Int, String>())
+        for (node in arrayOfStyleables) {
+            node.style {
+                backgroundColor += Color.RED
+            }
+            assertEquals("-fx-background-color: rgba(255, 0, 0, 1);", node.style)
+            node.style(append = true) {
+                padding = box(10.px)
+            }
+            assertEquals("-fx-background-color: rgba(255, 0, 0, 1); -fx-padding: 10px 10px 10px 10px;", node.style)
         }
-        assertEquals("-fx-background-color: rgba(255, 0, 0, 1);", node.style)
-        node.style(append = true) {
-            padding = box(10.px)
+    }
+
+    @Test
+    fun innerShadowRendering() {
+        stylesheet {
+            s(imageView) {
+                effect = InnerShadow(BlurType.GAUSSIAN, Color.GREENYELLOW, 7.0, 1.0, 1.0, 1.0)
+            }
+        } shouldEqual {
+            """
+            .image-view {
+                -fx-effect: innershadow(gaussian, rgba(173, 255, 47, 1), 7.0, 1.0, 1.0, 1.0);
+            }
+            """
         }
-        assertEquals("-fx-background-color: rgba(255, 0, 0, 1); -fx-padding: 10px 10px 10px 10px;", node.style)
+    }
+
+    @Test
+    fun barFillTest() {
+        stylesheet {
+            s(barChart) {
+                barFill = Color.RED
+            }
+        } shouldEqual {
+            """
+            .bar-chart {
+                -fx-bar-fill: rgba(255, 0, 0, 1);
+            }
+            """
+        }
     }
 
     private fun stylesheet(op: Stylesheet.() -> Unit) = Stylesheet().apply(op)

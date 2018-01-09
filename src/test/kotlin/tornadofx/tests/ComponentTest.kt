@@ -6,12 +6,13 @@ import org.testfx.api.FxToolkit
 import tornadofx.Fragment
 import tornadofx.singleAssign
 import tornadofx.vbox
+//import tornadofx.*
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
-class ComponentTests {
+class ComponentTest {
 
     val primaryStage: Stage = FxToolkit.registerPrimaryStage()
 
@@ -35,7 +36,6 @@ class ComponentTests {
 
         assertNull(mainFragment.subFragmentWithParam.nullableBooleanParam,
                 "nullable parameter value should match parameter passed in")
-
     }
 
     class MainFragment : Fragment() {
@@ -45,13 +45,13 @@ class ComponentTests {
         var subFragmentWithParam: SubFragment by singleAssign()
 
         override val root = vbox {
-            add(SubFragment::class) {
+            add<SubFragment> {
                 subFragmentNoParam = this
             }
-            add(SubFragment::class, mapOf(
-                    SubFragment::booleanParam to false,
-                    SubFragment::nullableBooleanParam to null
-            )) {
+            add<SubFragment>(
+                SubFragment::booleanParam to false,
+                SubFragment::nullableBooleanParam to null
+            ){
                 subFragmentWithParam = this
             }
         }
@@ -61,8 +61,7 @@ class ComponentTests {
     class SubFragment : Fragment() {
         val booleanParam: Boolean by param()
         val booleanParamWithDefault: Boolean by param(defaultValue = true)
-        val nullableBooleanParam: Boolean? by nullableParam()
-
+        val nullableBooleanParam: Boolean? by param()
         override val root = vbox()
     }
 

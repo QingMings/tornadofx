@@ -7,6 +7,7 @@ import javafx.geometry.*
 import javafx.scene.Cursor
 import javafx.scene.ImageCursor
 import javafx.scene.Node
+import javafx.scene.Parent
 import javafx.scene.control.*
 import javafx.scene.effect.BlendMode
 import javafx.scene.effect.DropShadow
@@ -82,7 +83,7 @@ interface SelectionHolder {
         removeSelection(oldSelection)
         val ruleSets = oldSelection.selector.rule
         if (ruleSets.size > 1) {
-            Stylesheet.log.warning ( "Selection has ${ruleSets.size} selectors, but only the first will be used" )
+            Stylesheet.log.warning("Selection has ${ruleSets.size} selectors, but only the first will be used")
         }
         val selection = CssSelection(CssSelector(toRuleSet().append(ruleSets[0], relation))) { mix(oldSelection.block) }
         addSelection(selection)
@@ -394,6 +395,11 @@ open class Stylesheet(vararg val imports: KClass<out Stylesheet>) : SelectionHol
         val datagridCell by cssclass()
         val datagridRow by cssclass()
 
+        // Keyboard
+        val keyboard by cssclass()
+        val keyboardKey by cssclass()
+        val keyboardSpacerKey by cssclass()
+
         // Pseudo classes used by JavaFX
         val armed by csspseudoclass()
         val bottom by csspseudoclass()
@@ -473,10 +479,11 @@ open class Stylesheet(vararg val imports: KClass<out Stylesheet>) : SelectionHol
     override fun render() = imports.map { "@import url(css://${it.java.name})" }.joinToString(separator = "\n", postfix = "\n") +
             selections.joinToString(separator = "") { it.render() }
 
-    val base64URL: URL get() {
-        val content = Base64.getEncoder().encodeToString(render().toByteArray(StandardCharsets.UTF_8))
-        return URL("css://$content:64")
-    }
+    val base64URL: URL
+        get() {
+            val content = Base64.getEncoder().encodeToString(render().toByteArray(StandardCharsets.UTF_8))
+            return URL("css://$content:64")
+        }
 
     val externalForm: String get() = base64URL.toExternalForm()
 }
@@ -491,7 +498,7 @@ open class PropertyHolder {
             is CssBox<*> -> "${toCss(value.top)} ${toCss(value.right)} ${toCss(value.bottom)} ${toCss(value.left)}"
             is FontWeight -> "${value.weight}"  // Needs to come before `is Enum<*>`
             is Enum<*> -> value.toString().toLowerCase().replace("_", "-")
-            is Font -> "${if (value.style == "Regular") "normal" else value.style} ${value.size}px ${toCss(value.family)}"
+            is Font -> "${if (value.style == "Regular") "normal" else value.style} ${value.size}pt ${toCss(value.family)}"
             is Cursor -> if (value is ImageCursor) {
                 value.image.javaClass.getDeclaredField("url").let {
                     it.isAccessible = true
@@ -534,7 +541,7 @@ open class PropertyHolder {
             is Effect -> when (value) { // JavaFX currently only supports DropShadow and InnerShadow in CSS
                 is DropShadow -> "dropshadow(${toCss(value.blurType)}, ${value.color.css}, " +
                         "${value.radius}, ${value.spread}, ${value.offsetX}, ${value.offsetY})"
-                is InnerShadow -> "dropshadow(${toCss(value.blurType)}, ${value.color.css}, " +
+                is InnerShadow -> "innershadow(${toCss(value.blurType)}, ${value.color.css}, " +
                         "${value.radius}, ${value.choke}, ${value.offsetX}, ${value.offsetY})"
                 else -> "none"
             }
@@ -550,6 +557,7 @@ open class PropertyHolder {
 
     // Root
     var baseColor: Color by cssprop("-fx-base")
+    var accentColor: Color by cssprop("-fx-accent")
     var focusColor: Paint by cssprop("-fx-focus-color")
     var faintFocusColor: Paint by cssprop("-fx-faint-focus-color")
 
@@ -778,6 +786,7 @@ open class PropertyHolder {
     // BarChar
     var barGap: Dimension<Dimension.LinearUnits> by cssprop("-fx-bar-gap")
     var categoryGap: Dimension<Dimension.LinearUnits> by cssprop("-fx-category-group")
+    var barFill: Color by cssprop("-fx-bar-fill")
 
     // CategoryAxis
     var startMargin: Dimension<Dimension.LinearUnits> by cssprop("-fx-start-margin")
@@ -899,12 +908,20 @@ class CssSelector(vararg val rule: CssRuleSet) : Selectable {
 }
 
 class CssSelectionBlock(op: CssSelectionBlock.() -> Unit) : PropertyHolder(), SelectionHolder {
+
+    val log = Logger.getLogger("ErrorHandler")
     val selections = mutableMapOf<CssSelection, Boolean>()  // If the boolean is true, this is a refine selection
 
     init {
         val currentScope = PropertyHolder.selectionScope.get()
         PropertyHolder.selectionScope.set(this)
-        op(this)
+        try {
+            op(this)
+        } catch (e: Exception) {
+            // the CSS rule caused an error, do not let the error propagate to
+            // avoid an infinite loop in the error handler
+            log.log(Level.WARNING, "CSS rule caused an error", e)
+        }
         PropertyHolder.selectionScope.set(currentScope)
     }
 
@@ -936,16 +953,12 @@ class CssSelectionBlock(op: CssSelectionBlock.() -> Unit) : PropertyHolder(), Se
     @Suppress("UNCHECKED_CAST")
     fun mix(mixin: CssSelectionBlock) {
         mixin.properties.forEach { k, v ->
-            if (properties[k]?.first is MultiValue<*>)
-                (properties[k]?.first as MultiValue<Any>).addAll(v.first as MultiValue<Any>)
-            else
-                properties[k] = v
+            (properties[k]?.first as? MultiValue<Any>)?.addAll(v.first as MultiValue<Any>)
+                    ?: run { properties[k] = v }
         }
         mixin.unsafeProperties.forEach { k, v ->
-            if (unsafeProperties[k] is MultiValue<*>)
-                (unsafeProperties[k] as MultiValue<Any>).addAll(v as MultiValue<Any>)
-            else
-                unsafeProperties[k] = v
+            (unsafeProperties[k] as? MultiValue<Any>)?.addAll(v as MultiValue<Any>)
+                    ?: run { unsafeProperties[k] = v }
         }
         selections.putAll(mixin.selections)
     }
@@ -1029,27 +1042,31 @@ class InlineCss : PropertyHolder(), Rendered {
 fun Iterable<Node>.style(append: Boolean = false, op: InlineCss.() -> Unit) = forEach { it.style(append, op) }
 
 fun Styleable.style(append: Boolean = false, op: InlineCss.() -> Unit) {
-    val block = InlineCss().apply(op)
 
-    fun setter(value: String) = when (this) {
-        is Node -> style = value
-        is MenuItem -> style = value
-        else -> throw IllegalArgumentException("Don't know how to set style for Styleable subclass ${this@style.javaClass}")
+    val setStyleMethod = this.javaClass.methods.firstOrNull { method ->
+        method.name == "setStyle" && method.returnType == Void.TYPE && method.parameterCount == 1 && method.parameters[0].type == String::class.java
     }
 
-    if (append && style.isNotBlank())
-        setter(style + block.render())
-    else
-        setter(block.render().trim())
-}
+    setStyleMethod ?: throw IllegalArgumentException("Don't know how to set style for Styleable subclass ${this@style.javaClass}")
 
-fun TableColumnBase<*, *>.style(append: Boolean = false, op: InlineCss.() -> Unit) {
     val block = InlineCss().apply(op)
 
-    if (append && style.isNotBlank())
-        style += block.render()
+    val newStyle = if (append && style.isNotBlank())
+        style + block.render()
     else
-        style = block.render().trim()
+        block.render().trim()
+
+    try {
+        // in Java 9 setStyleMethod.canAccess(this) can be used for checking instead of wrapping this invocation in a try-catch clause
+        setStyleMethod.invoke(this, newStyle)
+    } catch (exception: Exception) {
+        when (exception) {
+            is IllegalAccessException,
+            is IllegalArgumentException -> println("Cannot access ${this@style.javaClass}.setStyle(...) through reflection due to insufficient priviledge.")
+            else -> FX.log.warning("Invocation of ${this@style.javaClass}.setStyle(...) through reflection failed.")
+        }
+        throw exception
+    }
 }
 
 // Delegates
@@ -1058,7 +1075,7 @@ fun csselement(value: String? = null, snakeCase: Boolean = value == null) = CssE
 fun cssid(value: String? = null, snakeCase: Boolean = value == null) = CssIdDelegate(value, snakeCase)
 fun cssclass(value: String? = null, snakeCase: Boolean = value == null) = CssClassDelegate(value, snakeCase)
 fun csspseudoclass(value: String? = null, snakeCase: Boolean = value == null) = CssPseudoClassDelegate(value, snakeCase)
-inline fun <reified T : Any> cssproperty(value: String? = null, noinline renderer: ((T) -> String)? = null) = CssPropertyDelegate<T>(value, MultiValue::class.java.isAssignableFrom(T::class.java), renderer)
+inline fun <reified T : Any> cssproperty(value: String? = null, noinline renderer: ((T) -> String)? = null) = CssPropertyDelegate(value, MultiValue::class.java.isAssignableFrom(T::class.java), renderer)
 
 class CssElementDelegate(val name: String?, val snakeCase: Boolean = name == null) : ReadOnlyProperty<Any, CssRule> {
     override fun getValue(thisRef: Any, property: KProperty<*>) = CssRule.elem(name ?: property.name, snakeCase)
@@ -1096,7 +1113,7 @@ open class Dimension<T : Enum<T>>(val value: Double, val units: T) {
     private fun safeMath(value: Dimension<T>, op: (Double, Double) -> Double) = if (units == value.units)
         Dimension(op(this.value, value.value), units)
     else
-        throw IllegalArgumentException("Cannot combine $this and $value: Units do not match")
+        throw IllegalArgumentException("Cannot combine $this and $value: The units do not match")
 
     override fun equals(other: Any?) = other != null && other is Dimension<*> && value == other.value && units == other.units
     override fun hashCode() = value.hashCode() * 31 + units.hashCode()
@@ -1166,8 +1183,8 @@ internal fun String.toRuleSet() = if (matches(CssRule.ruleSetRegex)) {
     CssRuleSet(rules[0].rule, *rules.drop(1).toTypedArray())
 } else throw IllegalArgumentException("Invalid CSS Rule Set: $this")
 
-fun loadFont(path: String, size: Double): Font? {
-    return MethodHandles.lookup().lookupClass().getResourceAsStream(path)?.use { Font.loadFont(it, size) }
+fun loadFont(path: String, size: Number): Font? {
+    return MethodHandles.lookup().lookupClass().getResourceAsStream(path)?.use { Font.loadFont(it, size.toDouble()) }
 }
 
 // Style Class
@@ -1180,27 +1197,26 @@ fun Node.hasClass(cssClass: CssRule) = if (cssClass.prefix == ":") hasPseudoClas
 /**
  * Add one or more type safe css classes to this Node. Pseudo classes are also supported.
  */
-fun <T : Node> T.addClass(vararg cssClass: CssRule): T {
+fun <T : Node> T.addClass(vararg cssClass: CssRule) = apply {
     cssClass.forEach {
         if (it.prefix == ":") addPseudoClass(it.name) else addClass(it.name)
     }
-    return this
 }
 
 /**
  * Remove the given given type safe css class(es) from this node. Pseudo classes are also supported.
  */
-fun <T : Node> T.removeClass(vararg cssClass: CssRule): T {
+fun <T : Node> T.removeClass(vararg cssClass: CssRule) = apply {
     cssClass.forEach {
         if (it.prefix == ":") removePseudoClass(it.name) else removeClass(it.name)
     }
-    return this
 }
 
 /**
  * Toggle the given type safe css class based on the given predicate. Pseudo classes are also supported.
  */
 fun <T : Node> T.toggleClass(cssClass: CssRule, predicate: Boolean) = if (cssClass.prefix == ":") togglePseudoClass(cssClass.name, predicate) else toggleClass(cssClass.name, predicate)
+
 /**
  * Toggle the given type safe css class based on the given predicate observable value.
  * Whenever the observable value changes, the class is added or removed.
@@ -1257,10 +1273,7 @@ fun <T : Node> Node.select(selector: Selectable) = lookup(selector.toSelection()
 @Suppress("UNCHECKED_CAST")
 fun <T : Node> Node.selectAll(selector: Selectable) = (lookupAll(selector.toSelection().simpleRender()) as Set<T>).toList()
 
-fun <T : Node> T.setId(cssId: CssRule): T {
-    id = cssId.name
-    return this
-}
+fun <T : Node> T.setId(cssId: CssRule) = apply { id = cssId.name }
 
 // Containers
 
@@ -1306,6 +1319,12 @@ fun Color.ladder(vararg stops: Stop): Color {
     }
 }
 
+/**
+ * Converts the given Paint to a Background
+ */
+fun Paint.asBackground(radii: CornerRadii = CornerRadii.EMPTY, insets: Insets = Insets.EMPTY) =
+        Background(BackgroundFill(this, radii, insets))
+
 fun <T> multi(vararg elements: T) = MultiValue(elements)
 class MultiValue<T>(initialElements: Array<out T>? = null) {
     val elements = mutableListOf<T>()
@@ -1325,3 +1344,13 @@ class MultiValue<T>(initialElements: Array<out T>? = null) {
 }
 
 class BorderImageSlice(val widths: CssBox<Dimension<Dimension.LinearUnits>>, val filled: Boolean = false)
+
+fun Parent.stylesheet(op: Stylesheet.() -> Unit) {
+    val stylesheet = Stylesheet().apply(op)
+    stylesheets += stylesheet.base64URL.toExternalForm()
+}
+
+/**
+ * Adds the [stylesheet] to the given parent.
+ */
+inline fun <T: Stylesheet> Parent.addStylesheet(stylesheet: KClass<T>) = this.stylesheets.add("css://${stylesheet.java.name}")

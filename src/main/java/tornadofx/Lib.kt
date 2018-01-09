@@ -1,16 +1,11 @@
 package tornadofx
 
-import javafx.application.Platform
 import javafx.beans.InvalidationListener
 import javafx.beans.property.*
 import javafx.beans.value.*
-import javafx.collections.FXCollections
-import javafx.collections.ListChangeListener
-import javafx.collections.ObservableList
-import javafx.collections.ObservableSet
+import javafx.collections.*
 import javafx.collections.transformation.FilteredList
 import javafx.collections.transformation.SortedList
-import javafx.concurrent.Task
 import javafx.geometry.Insets
 import javafx.scene.control.ListView
 import javafx.scene.control.TableView
@@ -48,7 +43,7 @@ class SortedFilteredList<T>(
     }
 
     override val size: Int get() = sortedItems.size
-    override fun contains(element: T) = sortedItems.contains(element)
+    override fun contains(element: T) = element in sortedItems
     override fun containsAll(elements: Collection<T>) = sortedItems.containsAll(elements)
     override fun get(index: Int) = sortedItems[index]
     override fun indexOf(element: T) = sortedItems.indexOf(element)
@@ -174,10 +169,9 @@ class SortedFilteredList<T>(
      *
      * The underlying sortedItems.comparatorProperty` is automatically bound to `tableView.comparatorProperty`.
      */
-    fun bindTo(tableView: TableView<T>): SortedFilteredList<T> {
+    fun bindTo(tableView: TableView<T>): SortedFilteredList<T> = apply{
         tableView.items = this
         sortedItems.comparatorProperty().bind(tableView.comparatorProperty())
-        return this
     }
 
     /**
@@ -186,10 +180,7 @@ class SortedFilteredList<T>(
      * The `listView.items` is set to the underlying sortedItems.
      *
      */
-    fun bindTo(listView: ListView<T>): SortedFilteredList<T> {
-        listView.items = this
-        return this
-    }
+    fun bindTo(listView: ListView<T>): SortedFilteredList<T> = apply{ listView.items = this }
 
     /**
      * Update the filter predicate whenever the given observable changes. The filter expression
@@ -213,78 +204,7 @@ class SortedFilteredList<T>(
 
 fun <T> List<T>.observable(): ObservableList<T> = FXCollections.observableList(this)
 fun <T> Set<T>.observable(): ObservableSet<T> = FXCollections.observableSet(this)
-
-class FXTask<T>(val status: TaskStatus? = null, val func: FXTask<*>.() -> T) : Task<T>() {
-    val completedProperty: ReadOnlyBooleanProperty = SimpleBooleanProperty(false)
-    val completed by completedProperty
-
-    override fun call() = func(this)
-
-    init {
-        status?.item = this
-    }
-
-    override fun succeeded() {
-        (completedProperty as BooleanProperty).value = true
-    }
-
-    override fun failed() {
-        (completedProperty as BooleanProperty).value = true
-    }
-
-    override fun cancelled() {
-        (completedProperty as BooleanProperty).value = true
-    }
-
-    override public fun updateProgress(workDone: Long, max: Long) {
-        super.updateProgress(workDone, max)
-    }
-
-    override public fun updateProgress(workDone: Double, max: Double) {
-        super.updateProgress(workDone, max)
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    fun value(v: Any) {
-        super.updateValue(v as T)
-    }
-
-    override public fun updateTitle(t: String?) {
-        super.updateTitle(t)
-    }
-
-    override public fun updateMessage(m: String?) {
-        super.updateMessage(m)
-    }
-
-}
-
-open class TaskStatus : ItemViewModel<FXTask<*>>() {
-    val running: ReadOnlyBooleanProperty = bind { SimpleBooleanProperty().apply { if (item != null) bind(item.runningProperty()) } }
-    val completed: ReadOnlyBooleanProperty = bind { SimpleBooleanProperty().apply { if (item != null) bind(item.completedProperty) } }
-    val message: ReadOnlyStringProperty = bind { SimpleStringProperty().apply { if (item != null) bind(item.messageProperty()) } }
-    val title: ReadOnlyStringProperty = bind { SimpleStringProperty().apply { if (item != null) bind(item.titleProperty()) } }
-    val progress: ReadOnlyDoubleProperty = bind { SimpleDoubleProperty().apply { if (item != null) bind(item.progressProperty()) } }
-}
-
-fun <T> task(taskStatus: TaskStatus? = null, func: FXTask<*>.() -> T): Task<T> = FXTask(taskStatus, func = func).apply {
-    setOnFailed({ Thread.getDefaultUncaughtExceptionHandler().uncaughtException(Thread.currentThread(), exception) })
-    Thread(this).start()
-}
-
-infix fun <T> Task<T>.success(func: (T) -> Unit): Task<T> {
-    Platform.runLater {
-        setOnSucceeded { func(value) }
-    }
-    return this
-}
-
-infix fun <T> Task<T>.fail(func: (Throwable) -> Unit): Task<T> {
-    Platform.runLater {
-        setOnFailed { func(exception) }
-    }
-    return this
-}
+fun <K, V> Map<K, V>.observable(): ObservableMap<K, V> = FXCollections.observableMap(this)
 
 fun Clipboard.setContent(op: ClipboardContent.() -> Unit) {
     val content = ClipboardContent()
@@ -295,6 +215,24 @@ fun Clipboard.setContent(op: ClipboardContent.() -> Unit) {
 fun Clipboard.putString(value: String) = setContent { putString(value) }
 fun Clipboard.putFiles(files: MutableList<File>) = setContent { putFiles(files) }
 fun Clipboard.put(dataFormat: DataFormat, value: Any) = setContent { put(dataFormat, value) }
+
+/**
+ * Listen for changes to this observable. Optionally only listen x times.
+ * The lambda receives the changed value when the change occurs, which may be null,
+ */
+fun <T> ObservableValue<T>.onChangeTimes(times: Int, op: (T?) -> Unit) {
+    var counter = 0
+    val listener = object : ChangeListener<T> {
+        override fun changed(observable: ObservableValue<out T>?, oldValue: T, newValue: T) {
+            if (++counter == times) {
+                removeListener(this)
+            }
+            op(newValue)
+        }
+    }
+    addListener(listener)
+}
+fun <T> ObservableValue<T>.onChangeOnce(op: (T?) -> Unit) = onChangeTimes(1, op)
 
 fun <T> ObservableValue<T>.onChange(op: (T?) -> Unit) = apply { addListener { o, oldValue, newValue -> op(newValue) } }
 fun ObservableBooleanValue.onChange(op: (Boolean) -> Unit) = apply { addListener { o, old, new -> op(new ?: false) } }
@@ -355,3 +293,8 @@ fun <R> proxypropDouble(receiver: Property<R>, getter: Property<R>.() -> Double,
 fun insets(all: Number) = Insets(all.toDouble(), all.toDouble(), all.toDouble(), all.toDouble())
 fun insets(horizontal: Number? = null, vertical: Number? = null) = Insets(vertical?.toDouble() ?: 0.0, horizontal?.toDouble() ?: 0.0, vertical?.toDouble() ?: 0.0, horizontal?.toDouble() ?: 0.0)
 fun insets(top: Number? = null, right: Number? = null, bottom: Number? = null, left: Number? = null) = Insets(top?.toDouble() ?: 0.0, right?.toDouble() ?: 0.0, bottom?.toDouble() ?: 0.0, left?.toDouble() ?: 0.0)
+
+fun String.isLong() = toLongOrNull() != null
+fun String.isInt() = toIntOrNull() != null
+fun String.isDouble() = toDoubleOrNull() != null
+fun String.isFloat() = toFloatOrNull() != null
